@@ -6,7 +6,7 @@ A browser-based, top-down shooter with two operations: escape a hostile research
 
 ## Operations
 
-**Lab Escape** is a solo survival run through a maze of corridors and rooms. Search the facility for weapons, ammunition, grenades, medical supplies, and armor. Fight monsters and armed guards, locate extraction, then press **E** to leave. Standard, Hardcore, and Training conditions adjust the challenge; Balanced, Assault, and Medic kits change the starting equipment.
+**Lab Escape** is a solo survival run through a maze of corridors and rooms. Search distinct rooms and connecting corridors for guns, melee weapons, ammunition, grenades, medkits, and armor. Fight crawlers, brutes, spitters, and armed guards, locate extraction, then press **E** to leave. Four gear slots stay visible along the bottom; collect a weapon into an empty slot or select a slot to swap when full. All firearms have unlimited reserve ammunition and reloadable magazines. Standard, Hardcore, and Training conditions adjust the challenge; Balanced, Assault, and Medic kits change the starting equipment.
 
 **PvP Arena** is team deathmatch on a shared arena map. Choose 5v5 or 10v10, a side, and a score target. AI fills both teams. Collect equipment, eliminate opposing units, and help your team reach the target first. Teammates, opponents, and both spawn zones appear on the map.
 
@@ -18,7 +18,8 @@ A browser-based, top-down shooter with two operations: escape a hostile research
 | Mouse | Aim |
 | Hold left mouse button or Space | Fire / swing |
 | E | Collect nearby supplies or extract |
-| 1–4 | Select an inventory slot |
+| 1–4 | Select an inventory slot (or swap a weapon pickup) |
+| R | Reload the selected firearm |
 | G | Throw a grenade |
 | M | Show or hide the full map |
 | Escape or P | Pause |

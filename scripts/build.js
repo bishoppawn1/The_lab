@@ -10,6 +10,6 @@ await cp(new URL('src/', root), new URL('src/', out), { recursive: true });
 const stamp = Date.now().toString(36);
 const htmlPath = new URL('index.html', out);
 let html = await readFile(htmlPath, 'utf8');
-html = html.replace('./styles.css', `./styles.css?v=${stamp}`).replace('./src/app.js', `./src/app.js?v=${stamp}`);
+html = html.replace(/\.\/styles\.css(?:\?v=[^\"']*)?/, `./styles.css?v=${stamp}`).replace(/\.\/src\/app\.js(?:\?v=[^\"']*)?/, `./src/app.js?v=${stamp}`);
 await writeFile(htmlPath, html);
 console.log(`Built static game in dist/ (${stamp}).`);

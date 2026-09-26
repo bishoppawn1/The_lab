@@ -6,9 +6,9 @@ A browser-based, top-down shooter with two operations: escape a hostile research
 
 ## Operations
 
-**Lab Escape** is a solo survival run through a large facility with several loops and routes between rooms. Search for guns, melee weapons, ammunition, grenades, medkits, and armor. Fight crawlers, brutes, and spitters alongside a friendly guard, locate extraction, then press **E** to leave. Four gear slots stay visible along the bottom; collect a weapon into an empty slot or select a slot to swap when full. Firearm variants are rare; all firearms have unlimited reserve ammunition and reloadable magazines. Standard, Hardcore, and Training conditions adjust the challenge; Balanced, Assault, and Medic kits change the starting equipment.
+**Lab Escape** is a solo survival run through a large facility with several loops and routes between rooms. Search for guns, melee weapons, grenades, medkits, and armor. Guns have unlimited reserves and reloadable magazines, so there are no ammunition pickups. Fight crawlers, brutes, and spitters alongside a friendly guard, locate extraction, then press **E** to leave. Four gear slots stay visible along the bottom; collect a weapon into an empty slot or select a slot to swap when full. Firearm variants are rare. Standard, Hardcore, and Training conditions adjust the challenge; Balanced, Assault, and Medic kits change the starting equipment.
 
-**PvP Arena** is team deathmatch in the same multi-route facility map as Lab Escape. Choose 5v5 or 10v10, a side, and a score target. AI fills both teams. Collect equipment, eliminate opposing units, and help your team reach the target first. Teammates, opponents, and both spawn zones appear on the map.
+**PvP Arena** is team deathmatch in the same multi-route facility map as Lab Escape. Choose 5v5 or 10v10, a side, and a score target of 50, 100, or 250 eliminations. AI fills both teams; fighters collect ground weapons and switch guns to suit the current range. Collect equipment, eliminate opposing units, and help your team reach the target first. Teammates, opponents, and both spawn zones appear on the map.
 
 ## Controls
 
@@ -20,7 +20,8 @@ A browser-based, top-down shooter with two operations: escape a hostile research
 | E | Collect nearby supplies or extract |
 | 1–4 | Select an inventory slot (or swap a weapon pickup) |
 | R | Reload the selected firearm |
-| G | Throw a grenade |
+| G | Throw a grenade from any inventory slot |
+| Space / left mouse | Use the selected medkit or grenade; otherwise fire |
 | M | Show or hide the full map |
 | Escape or P | Pause |
 

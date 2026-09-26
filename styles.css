@@ -29,3 +29,7 @@
 .arena,.arena-inner{min-height:0}
 @media(max-width:760px){.game-toolbar{height:45px;flex-basis:45px}.game-layout{grid-template-rows:auto minmax(180px,1fr);padding:6px 0;gap:6px}.hud-left{grid-template-columns:1fr 1fr}.hud-left .objective-card{min-height:48px}.mobile-controls{bottom:94px}}
 @media(max-height:650px){.game-layout{padding:4px 0;gap:5px}.hud-left,.hud-right{gap:5px}.hud-panel{padding:6px}.map-panel canvas{max-height:140px}.inventory-dock{padding-top:4px;padding-bottom:3px}}
+/* Give the combat view nearly all available desktop width. */
+.shell:has(#game:not(.hidden)){max-width:none;padding-inline:clamp(12px,1.6vw,28px)}
+.game-layout{grid-template-columns:clamp(145px,12vw,190px) minmax(0,1fr) clamp(145px,12vw,190px);gap:10px}
+@media(max-width:760px){.game-layout{grid-template-columns:1fr;grid-template-rows:auto minmax(180px,1fr);gap:6px}}

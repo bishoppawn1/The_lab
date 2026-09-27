@@ -7,10 +7,10 @@ const source = readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
 const definitions = source.slice(0, source.indexOf("$('#select-survival').addEventListener"));
 
 function loadGameLogic(random) {
-  const element = { getContext: () => ({}), classList: { add() {}, remove() {} } };
-  const context = { document: { querySelector: () => element }, performance: { now: () => 1000 } };
+  const element = { getContext: () => ({}), classList: { add() {}, remove() {} }, appendChild() {}, addEventListener() {}, setAttribute() {}, dataset: {}, style: {} };
+  const context = { document: { querySelector: () => element, createElement: () => ({ ...element, dataset: {} }) }, performance: { now: () => 1000 } };
   if (random) context.Math = Object.assign(Object.create(Math), { random });
-  vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, WEAPONS, generateWorld, spawnLoot, takeLoot, respawnLoot, spawnBot, respawnBot, blocked, lineClear, interact, unlockDoor, updateVision, seedRoomThreats, spawnEnemy, firingLaneClear, updateBot, updateEnemy, botCanTakeLoot, botPickupLoot, hit, shoot, advanceBullet };`, context);
+  vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, WEAPONS, generateWorld, spawnLoot, takeLoot, respawnLoot, spawnAmbientLoot, updateLootSpawns, buildPlayer, dropPlayerLoadout, respawnPlayer, spawnBot, respawnBot, blocked, lineClear, interact, unlockDoor, updateVision, seedRoomThreats, spawnEnemy, firingLaneClear, updateBot, updateEnemy, botCanTakeLoot, botPickupLoot, hit, shoot, advanceBullet };`, context);
   return context.lab;
 }
 
@@ -84,10 +84,10 @@ test('collected world loot respawns as a different item in a new location', () =
   const pickup = state.loot[0];
   assert.equal(takeLoot(pickup), true);
   assert.equal(state.loot.some(item => item.spawnId === pickup.spawnId), false);
-  state.elapsed = 11;
+  state.elapsed = 5;
   respawnLoot();
   assert.equal(state.loot.some(item => item.spawnId === pickup.spawnId), false);
-  state.elapsed = 12;
+  state.elapsed = 6;
   respawnLoot();
   const returned = state.loot.find(item => item.spawnId === pickup.spawnId);
   assert.ok(returned);
@@ -110,7 +110,7 @@ test('themed room pickups reroll within their room', () => {
     const before = state.loot.find(item => item.room === roomName);
     const room = state.world.rooms.find(item => item.name === roomName);
     takeLoot(before);
-    state.elapsed += 12;
+    state.elapsed += 6;
     respawnLoot();
     const after = state.loot.find(item => item.spawnId === before.spawnId);
     assert.ok(after);
@@ -151,6 +151,60 @@ test('deathmatch bots roll varied starter weapons on spawn and respawn', () => {
     respawnStarters.add(bot.inventory[1]);
   }
   assert.ok(respawnStarters.size >= 5, 'bot respawns should also reroll their gear');
+});
+
+test('the player shares the arena starter roll and drops only found gear', () => {
+  let seed = 9401;
+  const random = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+  const { state, generateWorld, buildPlayer, dropPlayerLoadout, respawnPlayer, WEAPONS } = loadGameLogic(random);
+  state.mode = 'pvp';
+  state.settings.team = 'blue';
+  generateWorld('pvp');
+  state.bots = [];
+  state.enemies = [];
+  state.loot = [];
+  const playerStarters = new Set();
+  let equippedStarter = null;
+  for (let i = 0; i < 24; i++) {
+    const player = buildPlayer();
+    assert.equal(player.inventory[0], 0);
+    assert.equal(player.starterWeapon, player.inventory[1]);
+    assert.ok(player.inventory[1] == null || WEAPONS[player.inventory[1]]);
+    playerStarters.add(player.inventory[1]);
+    if (player.inventory[1] != null) equippedStarter = player;
+  }
+  assert.ok(playerStarters.size >= 5, 'the player should receive the same varied starting gear as bots');
+  const p = equippedStarter;
+  assert.ok(p);
+  state.player = p;
+  p.inventory[2] = { item: 'grenade', count: 1 };
+  dropPlayerLoadout();
+  assert.equal(state.loot.length, 1);
+  assert.equal(state.loot[0].type, 'grenade');
+  p.alive = false;
+  respawnPlayer();
+  assert.equal(p.alive, true);
+  assert.equal(p.inventory[0], 0);
+  assert.equal(p.starterWeapon, p.inventory[1]);
+  assert.ok(p.inventory[1] == null || WEAPONS[p.inventory[1]]);
+});
+
+test('new random supplies appear during play without exceeding the density cap', () => {
+  const { state, generateWorld, spawnLoot, updateLootSpawns } = loadGameLogic();
+  state.mode = 'pvp';
+  generateWorld('pvp');
+  state.player = { alive: false, x: 0, y: 0, r: 11 };
+  state.bots = [];
+  state.enemies = [];
+  spawnLoot(40);
+  const baseline = state.loot.length;
+  updateLootSpawns(6.9);
+  assert.equal(state.loot.length, baseline);
+  updateLootSpawns(.2);
+  assert.equal(state.loot.length, baseline + 1);
+  assert.equal(state.loot.at(-1).spawnId, undefined);
+  for (let i = 0; i < 30; i++) updateLootSpawns(7);
+  assert.equal(state.loot.length, baseline + 20);
 });
 
 test('larger maps receive more supplies without flooding them with weapons', () => {

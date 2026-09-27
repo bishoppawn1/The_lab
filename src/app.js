@@ -24,11 +24,12 @@ const LOOT_TABLE = [
   {type:'weapon',weapon:7,label:'HEAVY PISTOL · RARE',color:'#ed9c72',weight:.25},{type:'weapon',weapon:8,label:'TACTICAL SMG · RARE',color:'#87c4a2',weight:.23},{type:'weapon',weapon:9,label:'PRECISION RIFLE · RARE',color:'#9cbbdf',weight:.2},{type:'weapon',weapon:10,label:'BREACH SHOTGUN · RARE',color:'#e59b8d',weight:.18},
   {type:'health',label:'MEDKIT',color:'#90d485',weight:13},{type:'armor',label:'ARMOR',color:'#78b5de',weight:10},{type:'grenade',label:'GRENADE',color:'#dd8e68',weight:8},
 ];
+const SUPPLY_LOOT = LOOT_TABLE.filter(item=>item.type!=='weapon');
 const PLAYER_SIGHT_RANGE = 320;
-const LOOT_RESPAWN_SECONDS = 20;
+const LOOT_RESPAWN_SECONDS = 12;
 const GRENADE_THROW_DISTANCE = 210;
 const MELEE_SWING_MS = 300;
-function weightedLoot(){let value=Math.random()*LOOT_TABLE.reduce((sum,item)=>sum+item.weight,0);for(const item of LOOT_TABLE){value-=item.weight;if(value<=0)return item;}return LOOT_TABLE.at(-1);}
+function weightedLoot(table=LOOT_TABLE){let value=Math.random()*table.reduce((sum,item)=>sum+item.weight,0);for(const item of table){value-=item.weight;if(value<=0)return item;}return table.at(-1);}
 
 const state = {running:false,paused:false,runId:0,mode:'survival',world:null,player:null,bots:[],enemies:[],bullets:[],loot:[],lootRespawns:[],particles:[],decor:[],keys:new Set(),mouse:{x:0,y:0,down:false},touchFire:false,camera:{x:0,y:0},lastTime:0,elapsed:0,fireAt:0,round:1,spawnTimer:0,scoreBlue:0,scoreRed:0,kills:0,found:0,skips:0,teamSize:5,feed:[],visibleMap:false,roundEnd:false,botFill:true,pendingLoot:null,settings:{team:'blue',target:50}};
 let lastNotice=0, audioContext=null;
@@ -39,48 +40,34 @@ function showMenu(){state.running=false;state.paused=false;state.runId++;clearOp
 function openSetup(mode){state.running=false;state.paused=false;state.runId++;clearOperationUi();state.mode=mode;state.teamSize=5;state.settings={team:'blue',target:50,difficulty:'standard',loadout:'balanced'};menu.classList.add('hidden');game.classList.add('hidden');setup.classList.remove('hidden');$('#setup-title').innerHTML=mode==='survival'?'LAB<br><span>ESCAPE.</span>':'TEAM<br><span>DEATHMATCH.</span>';$('#setup-subtitle').textContent=mode==='survival'?'Explore the facility, gather supplies, and reach extraction.':'Choose a team size and take your squad into the arena.';$('#setup-options').innerHTML=mode==='survival'?`<div class="config-label">FACILITY CONDITIONS</div><div class="choice-row" id="difficulty-row"><button class="choice selected" data-value="standard">STANDARD</button><button class="choice" data-value="survival">HARDCORE</button><button class="choice" data-value="training">TRAINING</button></div><div class="config-label">FIELD KIT</div><div class="choice-row" id="loadout-row"><button class="choice selected" data-value="balanced">BALANCED</button><button class="choice" data-value="assault">ASSAULT</button><button class="choice" data-value="medic">MEDIC</button></div>`:`<div class="config-label">TEAM SIZE · AI FILL ${state.botFill?'ON':'OFF'}</div><div class="choice-row" id="size-row"><button class="choice selected" data-value="5">5 VS 5</button><button class="choice" data-value="10">10 VS 10</button></div><div class="config-label">YOUR TEAM</div><div class="choice-row" id="team-row"><button class="choice selected" data-value="blue">BLUE TEAM</button><button class="choice" data-value="red">RED TEAM</button></div><div class="config-label">MATCH TARGET</div><div class="choice-row" id="target-row"><button class="choice selected" data-value="50">FIRST TO 50</button><button class="choice" data-value="100">FIRST TO 100</button><button class="choice" data-value="250">FIRST TO 250</button></div>`;$('#start-button').innerHTML=`${mode==='survival'?'BEGIN OPERATION':'ENTER ARENA'} <span>→</span>`;setup.querySelectorAll('.choice-row').forEach(row=>row.addEventListener('click',e=>{const b=e.target.closest('.choice');if(!b)return;row.querySelectorAll('.choice').forEach(x=>x.classList.remove('selected'));b.classList.add('selected');if(row.id==='size-row')state.teamSize=Number(b.dataset.value);if(row.id==='team-row')state.settings.team=b.dataset.value;if(row.id==='target-row')state.settings.target=Number(b.dataset.value);if(row.id==='difficulty-row')state.settings.difficulty=b.dataset.value;if(row.id==='loadout-row')state.settings.loadout=b.dataset.value;}));}
 function floorTile(x,y){return state.world.map[y]?.[x]===0;}
 function generateWorld(mode){
-  const w=110,h=83,map=Array.from({length:h},()=>Array(w).fill(1));
+  const w=160,h=116,map=Array.from({length:h},()=>Array(w).fill(1));
   const carve=(x1,y1,x2,y2)=>{for(let y=y1;y<=y2;y++)for(let x=x1;x<=x2;x++)if(x>0&&y>0&&x<w-1&&y<h-1)map[y][x]=0;};
-  const names=['WORKSHOP','ARMORY','RESEARCH LAB','SPECIMEN HOLD','MEDICAL','STORAGE','NEST CHAMBER','CONTROL ROOM','SERVER ROOM','POWER STATION'];
+  const names=['WORKSHOP','ARMORY','RESEARCH LAB','SPECIMEN HOLD','MEDICAL','STORAGE','NEST CHAMBER','CONTROL ROOM','SERVER ROOM','POWER STATION','OBSERVATION','CHEMISTRY','MAINTENANCE','ARCHIVES','QUARANTINE','GENERATOR'];
   for(let i=names.length-1;i>0;i--){const j=Math.floor(rand(0,i+1));[names[i],names[j]]=[names[j],names[i]];}
-  const columns=[14,41,68,95],rows=[14,41,68],rooms=[];
-  for(let row=0;row<3;row++)for(let col=0;col<4;col++){
-    const index=row*4+col,rw=Math.floor(rand(13,21)),rh=Math.floor(rand(13,19));
-    const cx=columns[col]+Math.floor(rand(-3,4)),cy=rows[row]+Math.floor(rand(-3,4));
-    const room={x:Math.floor(cx-rw/2),y:Math.floor(cy-rh/2),w:rw,h:rh,name:index===0?'ENTRY BAY':index===11?'EXTRACTION BAY':names[index-1]};
+  const corridors={horizontal:[34,82],vertical:[26,76,126]};
+  for(const y of corridors.horizontal)carve(7,y-1,w-8,y+1);
+  for(const x of corridors.vertical)carve(x,34,x+2,82);
+  const columns=[14,39,64,89,114,139],rows=[15,58,101],rooms=[];
+  for(let row=0;row<3;row++)for(let col=0;col<6;col++){
+    const index=row*6+col,rw=Math.floor(rand(11,17)),rh=Math.floor(rand(11,16));
+    const cx=columns[col]+Math.floor(rand(-2,3)),cy=rows[row]+Math.floor(rand(-2,3));
+    const room={x:Math.floor(cx-rw/2),y:Math.floor(cy-rh/2),w:rw,h:rh,name:index===0?'ENTRY BAY':index===17?'EXTRACTION BAY':names[index-1]};
     rooms.push(room);carve(room.x+1,room.y+1,room.x+rw-2,room.y+rh-2);
+    const door=room.x+Math.floor(rand(3,room.w-4));
+    if(row===0)carve(door,room.y+room.h-1,door+1,corridors.horizontal[0]);
+    else if(row===2)carve(door,corridors.horizontal[1],door+1,room.y);
+    else if(Math.random()<.5)carve(door,corridors.horizontal[0],door+1,room.y);
+    else carve(door,room.y+room.h-1,door+1,corridors.horizontal[1]);
   }
-  const candidates=[];for(let row=0;row<3;row++)for(let col=0;col<4;col++){
-    const a=row*4+col;if(col<3)candidates.push([a,a+1]);if(row<2)candidates.push([a,a+4]);
-  }
-  const degree=Array(rooms.length).fill(0),links=[];
-  for(let attempt=0;attempt<100;attempt++){
-    const parent=rooms.map((_,i)=>i),find=i=>{while(parent[i]!==i)i=parent[i]=parent[parent[i]];return i;};
-    const shuffled=[...candidates];for(let i=shuffled.length-1;i>0;i--){const j=Math.floor(rand(0,i+1));[shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]];}
-    degree.fill(0);links.length=0;
-    for(const [a,b] of shuffled){const rootA=find(a),rootB=find(b);if(rootA===rootB||degree[a]>=3||degree[b]>=3)continue;links.push([a,b]);degree[a]++;degree[b]++;parent[rootA]=rootB;}
-    if(links.length===rooms.length-1)break;
-  }
-  if(links.length!==rooms.length-1){degree.fill(0);links.length=0;for(let row=0;row<3;row++)for(let col=0;col<3;col++)links.push([row*4+col,row*4+col+1]);links.push([3,7],[4,8]);for(const [a,b] of links){degree[a]++;degree[b]++;}}
-  const extras=candidates.filter(([a,b])=>!links.some(([x,y])=>x===a&&y===b));
-  for(let i=extras.length-1;i>0;i--){const j=Math.floor(rand(0,i+1));[extras[i],extras[j]]=[extras[j],extras[i]];}
-  let added=0,extraTarget=Math.floor(rand(1,4));for(const [a,b] of extras)if(added<extraTarget&&degree[a]<3&&degree[b]<3){const leaves=degree.filter(count=>count===1).length,closedEnds=Number(degree[a]===1)+Number(degree[b]===1);if(leaves-closedEnds<1)continue;links.push([a,b]);degree[a]++;degree[b]++;added++;}
-  for(const [a,b] of links){const first=rooms[a],second=rooms[b];if(Math.floor(a/4)===Math.floor(b/4)){
-    const low=Math.max(first.y+2,second.y+2),high=Math.min(first.y+first.h-4,second.y+second.h-4);
-    const door=clamp(Math.floor((low+high)/2+rand(-2,3)),low,high);carve(first.x+first.w-2,door,second.x+1,door+1);
-  }else{
-    const low=Math.max(first.x+2,second.x+2),high=Math.min(first.x+first.w-4,second.x+second.w-4);
-    const door=clamp(Math.floor((low+high)/2+rand(-2,3)),low,high);carve(door,first.y+first.h-2,door+1,second.y+1);
-  }}
   for(const room of rooms)if(Math.random()<.68){for(let attempt=0;attempt<8;attempt++){
     const x=Math.floor(rand(room.x+3,room.x+room.w-4)),y=Math.floor(rand(room.y+3,room.y+room.h-4));
     if(Math.hypot(x-(room.x+room.w/2),y-(room.y+room.h/2))<4)continue;
     for(let oy=0;oy<2;oy++)for(let ox=0;ox<2;ox++)map[y+oy][x+ox]=1;break;
   }}
   const center=room=>({x:(room.x+Math.floor(room.w/2)+.5)*32,y:(room.y+Math.floor(room.h/2)+.5)*32});
-  const start=center(rooms[0]),end=center(rooms[11]);
-  state.world={w,h,map,tile:32,mode,rooms,exit:{...end,r:39},spawnZones:[start,end],explored:new Set(),visible:new Set(),visionAt:0,labels:rooms.map(room=>({...center(room),text:room.name}))};
-  state.decor=[];for(let i=0;i<420;i++){const x=rand(2,w-2),y=rand(2,h-2);if(floorTile(Math.floor(x),Math.floor(y)))state.decor.push({x:(x+.5)*32,y:(y+.5)*32,r:rand(1,4),alpha:rand(.04,.15),kind:Math.random()>.5?'stain':'debris'});}
+  const start=center(rooms[0]),end=center(rooms[17]);
+  state.world={w,h,map,tile:32,mode,rooms,corridors,exit:{...end,r:39},spawnZones:[start,end],explored:new Set(),visible:new Set(),visionAt:0,labels:rooms.map(room=>({...center(room),text:room.name}))};
+  state.decor=[];for(let i=0;i<650;i++){const x=rand(2,w-2),y=rand(2,h-2);if(floorTile(Math.floor(x),Math.floor(y)))state.decor.push({x:(x+.5)*32,y:(y+.5)*32,r:rand(1,4),alpha:rand(.04,.15),kind:Math.random()>.5?'stain':'debris'});}
 }
 function findOpen(nearX=31,nearY=24,minDistance=0,maxDistance=Infinity){for(let i=0;i<900;i++){const tx=Math.floor(rand(1,state.world.w-1)),ty=Math.floor(rand(1,state.world.h-1)),p={x:(tx+.5)*32,y:(ty+.5)*32},d=Math.hypot(tx-nearX,ty-nearY);if(floorTile(tx,ty)&&d>=minDistance&&d<=maxDistance&&!blocked(p.x,p.y,9)&&!occupied(p,18))return p;}let fallback=null,best=Infinity;for(let y=1;y<state.world.h-1;y++)for(let x=1;x<state.world.w-1;x++){const p={x:(x+.5)*32,y:(y+.5)*32},d=(x+.5-nearX)**2+(y+.5-nearY)**2;if(d<best&&floorTile(x,y)&&!blocked(p.x,p.y,9)&&!occupied(p,18)){fallback=p;best=d;}}return fallback||{x:(nearX+.5)*32,y:(nearY+.5)*32};}
 function occupied(p,r){return state.enemies.some(e=>e.alive&&dist(p,e)<r+e.r)||state.bots.some(b=>b.alive&&dist(p,b)<r+b.r)||state.player&&state.player.alive&&dist(p,state.player)<r+state.player.r;}
@@ -126,15 +113,15 @@ function spawnLoot(count){
     state.loot.push({...spot,type:'weapon',weapon,label:spec.name.toUpperCase(),color:spec.color,r:10,bob:rand(0,Math.PI*2),id:team});
   }
   for(let i=state.loot.length;i<count;i++){
-    const spot=findOpen(),item=weightedLoot();state.loot.push({...spot,...item,r:10,bob:rand(0,Math.PI*2),id:i});
+    const spot=findOpen(),item=weightedLoot(i<(state.mode==='survival'?22:18)?LOOT_TABLE:SUPPLY_LOOT);state.loot.push({...spot,...item,r:10,bob:rand(0,Math.PI*2),id:i});
   }
   state.loot.forEach((item,index)=>item.spawnId=index);
 }
 function takeLoot(item){if(!state.loot.includes(item))return false;state.loot=state.loot.filter(loot=>loot!==item);if(item.spawnId!=null)state.lootRespawns.push({item:{...item,bob:0},at:state.elapsed+LOOT_RESPAWN_SECONDS});return true;}
 function respawnLoot(){for(let i=state.lootRespawns.length-1;i>=0;i--){const entry=state.lootRespawns[i];if(state.elapsed<entry.at)continue;if(occupied(entry.item,12)){entry.at=state.elapsed+2;continue;}state.loot.push({...entry.item,bob:rand(0,Math.PI*2)});state.lootRespawns.splice(i,1);}}
 function startGame(){clearOperationUi();state.runId++;setup.classList.add('hidden');menu.classList.add('hidden');game.classList.remove('hidden');state.elapsed=0;state.kills=0;state.found=0;state.feed=[];state.visibleMap=false;state.bullets=[];state.lootRespawns=[];state.particles=[];state.round=1;state.roundEnd=false;state.scoreBlue=0;state.scoreRed=0;state.player=null;generateWorld(state.mode);state.player=buildPlayer();state.bots=[];state.enemies=[];state.spawnTimer=0;
-  if(state.mode==='survival'){state.player.x=state.world.spawnZones[0].x;state.player.y=state.world.spawnZones[0].y;state.player.invuln=2.5;if(state.settings.difficulty==='training'){state.player.hp=state.player.maxHp=150;state.player.armor=20;}else if(state.settings.difficulty==='survival'){state.player.hp=state.player.maxHp=80;}spawnLoot(22);spawnEnemy('guard');const threatTotal=state.settings.difficulty==='training'?3:state.settings.difficulty==='survival'?7:5;for(let i=0;i<threatTotal;i++)spawnEnemy('monster');$('#mode-label').textContent='LAB ESCAPE';$('#objective-label').textContent='REACH EXTRACTION';$('#objective-detail').textContent='Explore the lab';$('#objective-detail').classList.remove('blue-text');$('#score-panel').classList.add('hidden');$('#map-status').textContent='— EXPLORE';log('You entered Facility 07-C. Find a way out.','good');log('Supplies are marked by their silhouettes. Press E to collect.','good');}
-  else {spawnLoot(18);const playerColor=state.settings.team==='blue'?'blue':'red',enemyColor=playerColor==='blue'?'red':'blue';state.player.team=playerColor;state.player.x=state.world.spawnZones[playerColor==='blue'?0:1].x;state.player.y=state.world.spawnZones[playerColor==='blue'?0:1].y;for(let i=0;i<state.teamSize-1;i++)spawnBot(playerColor,i);for(let i=0;i<state.teamSize;i++)spawnBot(enemyColor,i);$('#mode-label').textContent=`TEAM DEATHMATCH · ${state.teamSize}V${state.teamSize}`;$('#objective-label').textContent=`FIRST TEAM TO ${state.settings.target} WINS`;$('#objective-detail').textContent=`Win ${state.settings.target} eliminations`;$('#score-target').textContent=`FIRST TO ${state.settings.target}`;$('#score-panel').classList.remove('hidden');$('#teams-line').textContent=`${state.teamSize}V${state.teamSize} · BOTS ACTIVE`;$('#map-status').textContent='— TEAM VISION';log(`${state.teamSize}v${state.teamSize} match active. AI squads deployed.`,'good');log('Collect gear, then fight for your team.');}
+  if(state.mode==='survival'){state.player.x=state.world.spawnZones[0].x;state.player.y=state.world.spawnZones[0].y;state.player.invuln=2.5;if(state.settings.difficulty==='training'){state.player.hp=state.player.maxHp=150;state.player.armor=20;}else if(state.settings.difficulty==='survival'){state.player.hp=state.player.maxHp=80;}spawnLoot(46);spawnEnemy('guard');const threatTotal=state.settings.difficulty==='training'?3:state.settings.difficulty==='survival'?7:5;for(let i=0;i<threatTotal;i++)spawnEnemy('monster');$('#mode-label').textContent='LAB ESCAPE';$('#objective-label').textContent='REACH EXTRACTION';$('#objective-detail').textContent='Explore the lab';$('#objective-detail').classList.remove('blue-text');$('#score-panel').classList.add('hidden');$('#map-status').textContent='— EXPLORE';log('You entered Facility 07-C. Find a way out.','good');log('Supplies are marked by their silhouettes. Press E to collect.','good');}
+  else {spawnLoot(40);const playerColor=state.settings.team==='blue'?'blue':'red',enemyColor=playerColor==='blue'?'red':'blue';state.player.team=playerColor;state.player.x=state.world.spawnZones[playerColor==='blue'?0:1].x;state.player.y=state.world.spawnZones[playerColor==='blue'?0:1].y;for(let i=0;i<state.teamSize-1;i++)spawnBot(playerColor,i);for(let i=0;i<state.teamSize;i++)spawnBot(enemyColor,i);$('#mode-label').textContent=`TEAM DEATHMATCH · ${state.teamSize}V${state.teamSize}`;$('#objective-label').textContent=`FIRST TEAM TO ${state.settings.target} WINS`;$('#objective-detail').textContent=`Win ${state.settings.target} eliminations`;$('#score-target').textContent=`FIRST TO ${state.settings.target}`;$('#score-panel').classList.remove('hidden');$('#teams-line').textContent=`${state.teamSize}V${state.teamSize} · BOTS ACTIVE`;$('#map-status').textContent='— TEAM VISION';log(`${state.teamSize}v${state.teamSize} match active. AI squads deployed.`,'good');log('Collect gear, then fight for your team.');}
   $('#threat-count').textContent=state.mode==='survival'?String(state.enemies.filter(e=>e.alive&&e.type==='monster').length):String(state.bots.length+1);$('#kill-count').textContent='0';$('#loot-count').textContent='0';$('#grenade-count').textContent=String(inventoryGrenades());$('#blue-score').textContent='0';$('#red-score').textContent='0';$('#health-value').textContent=String(state.player.hp);$('#health-bar').style.width='100%';$('#armor-value').textContent=`+ ${state.player.armor} ARM`;$('#armor-bar').style.width=`${state.player.armor}%`;renderWeapons();$('#event-log').innerHTML='';updateHUD();state.running=true;state.paused=false;state.lastTime=performance.now();resizeCanvas();const runId=state.runId;requestAnimationFrame(now=>frame(now,runId));}
 function spawnBot(team,i){const zone=state.world.spawnZones[team==='blue'?0:1],pos=findOpen(zone.x/32,zone.y/32,0,7);const b={...pos,team,ai:true,alive:true,r:10,hp:100,maxHp:100,speed:rand(85,115),inventory:[0,1,null,null],pickedSlots:[false,false,false,false],pickedArmor:false,active:Math.random()<.5?0:1,ammo:{1:30},angle:0,fireTime:rand(0,500),stun:0,invuln:0,respawn:0,id:`${team}${i}`,kills:0,target:null,think:rand(0,1)};state.bots.push(b);}
 function spawnEnemy(type='monster'){const origin=state.player||{x:40*32,y:32*32},pos=findOpen(origin.x/32,origin.y/32,type==='guard'?5:15,40),hard=state.settings.difficulty==='survival',training=state.settings.difficulty==='training',variant=type==='guard'?null:choice(['crawler','crawler','brute','spitter']);const specs=type==='guard'?{r:10,hp:76,speed:72,damage:10}:{crawler:{r:9,hp:40,speed:126,damage:7},brute:{r:16,hp:142,speed:48,damage:17},spitter:{r:12,hp:64,speed:83,damage:9}}[variant];const e={...pos,type,variant,alive:true,r:specs.r,hp:specs.hp*(hard?1.2:1),maxHp:specs.hp*(hard?1.2:1),speed:specs.speed*(training?.8:hard?1.1:1),damage:specs.damage*(training?.55:hard?1.4:1),angle:0,fireTime:rand(200,900),stun:0,invuln:0,hitFlash:0,think:0,target:null,pathPoint:null,id:Math.random(),team:type==='guard'?(state.player?.team||'blue'):null};state.enemies.push(e);}

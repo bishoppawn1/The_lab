@@ -44,16 +44,26 @@ test('generated rooms remain connected across different layouts', () => {
   const { state, generateWorld } = loadGameLogic();
   const layouts = new Set();
   for (let run = 0; run < 250; run++) {
-    generateWorld('survival');
+    const mode = run % 2 ? 'pvp' : 'survival';
+    generateWorld(mode);
     const { world } = state;
-    assert.equal(world.rooms.length, 12);
+    assert.equal(world.mode, mode);
+    assert.equal(world.w, 160);
+    assert.equal(world.h, 116);
+    assert.equal(world.rooms.length, 18);
+    for (const y of world.corridors.horizontal) {
+      for (let x = 7; x <= world.w - 8; x++) assert.equal(world.map[y][x], 0, `main corridor at ${x},${y} must stay open`);
+    }
+    for (const x of world.corridors.vertical) {
+      for (let y = 34; y <= 82; y++) assert.equal(world.map[y][x], 0, `cross-corridor at ${x},${y} must stay open`);
+    }
     layouts.add(world.rooms.map(room => `${room.x},${room.y},${room.w},${room.h}`).join('|'));
     const reachable = reachableTiles(world, world.spawnZones[0]);
     for (const room of world.rooms) {
       const x = room.x + Math.floor(room.w / 2);
       const y = room.y + Math.floor(room.h / 2);
       assert.ok(reachable.has(`${x},${y}`), `${room.name} must be reachable`);
-      assert.ok(roomExits(world, room) >= 1 && roomExits(world, room) <= 3, `${room.name} should have one to three exits`);
+      assert.equal(roomExits(world, room), 1, `${room.name} should branch from a main corridor through one entrance`);
     }
     assert.ok(world.rooms.some(room => roomExits(world, room) === 1), 'each layout should contain a dead-end room');
     assert.ok(reachable.has(`${Math.floor(world.exit.x / 32)},${Math.floor(world.exit.y / 32)}`));
@@ -71,10 +81,10 @@ test('collected world loot returns to its original location', () => {
   const pickup = state.loot[0];
   assert.equal(takeLoot(pickup), true);
   assert.equal(state.loot.some(item => item.spawnId === pickup.spawnId), false);
-  state.elapsed = 19;
+  state.elapsed = 11;
   respawnLoot();
   assert.equal(state.loot.some(item => item.spawnId === pickup.spawnId), false);
-  state.elapsed = 20;
+  state.elapsed = 12;
   respawnLoot();
   const returned = state.loot.find(item => item.spawnId === pickup.spawnId);
   assert.ok(returned);
@@ -83,6 +93,21 @@ test('collected world loot returns to its original location', () => {
   assert.equal(returned.type, pickup.type);
   respawnLoot();
   assert.equal(state.loot.filter(item => item.spawnId === pickup.spawnId).length, 1);
+});
+
+test('larger maps receive more supplies without flooding them with weapons', () => {
+  const { state, generateWorld, spawnLoot } = loadGameLogic();
+  state.player = { alive: false, x: 0, y: 0, r: 11 };
+  state.bots = [];
+  state.enemies = [];
+  for (const [mode, count, weaponLimit] of [['survival', 46, 22], ['pvp', 40, 18]]) {
+    state.mode = mode;
+    generateWorld(mode);
+    spawnLoot(count);
+    assert.equal(state.loot.length, count);
+    assert.ok(state.loot.slice(weaponLimit).every(item => item.type !== 'weapon'), `${mode} extra pickup sites should contain supplies`);
+    assert.equal(new Set(state.loot.map(item => item.spawnId)).size, count);
+  }
 });
 
 test('both arena teams have a melee pickup to discover', () => {

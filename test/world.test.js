@@ -9,7 +9,7 @@ const definitions = source.slice(0, source.indexOf("$('#select-survival').addEve
 function loadGameLogic() {
   const element = { getContext: () => ({}) };
   const context = { document: { querySelector: () => element } };
-  vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, generateWorld, spawnLoot, takeLoot, respawnLoot };`, context);
+  vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, generateWorld, spawnLoot, takeLoot, respawnLoot, firingLaneClear, updateBot };`, context);
   return context.lab;
 }
 
@@ -111,4 +111,33 @@ test('opening another operation after a result hides the old game and result', (
   assert.equal(element('#end-overlay').classList.contains('hidden'), true);
   assert.equal(element('#setup').classList.contains('hidden'), false);
   assert.equal(state.mode, 'pvp');
+});
+
+test('opposing bots move around a close corner instead of stopping at the wall', () => {
+  const { state, firingLaneClear, updateBot } = loadGameLogic();
+  const map = Array.from({ length: 9 }, () => Array(9).fill(1));
+  for (let y = 1; y <= 5; y++) map[y][2] = 0;
+  for (let x = 2; x <= 6; x++) map[5][x] = 0;
+  state.world = { w: 9, h: 9, tile: 32, map };
+  state.mode = 'pvp';
+  state.player = { alive: false, team: 'blue', x: 0, y: 0 };
+  state.loot = [];
+  const bot = (team, x, y) => ({ team, x, y, r: 10, speed: 105, alive: true, inventory: [0, null, null, null], active: 0, ammo: {}, think: 0, fireTime: 0, invuln: 0, hitFlash: 0 });
+  const blue = bot('blue', 2.5 * 32, 3.5 * 32);
+  const red = bot('red', 4.5 * 32, 5.5 * 32);
+  state.bots = [blue, red];
+  state.bullets = [];
+  state.particles = [];
+  assert.equal(firingLaneClear(blue, red), false);
+  assert.ok(Math.hypot(blue.x - red.x, blue.y - red.y) < 145);
+  updateBot(blue, 0.016, 1000);
+  updateBot(red, 0.016, 1000);
+  assert.equal(state.bullets.length, 0, 'bots should hold fire while the wall blocks the shot');
+  blue.fireTime = red.fireTime = Infinity;
+  for (let frame = 1; frame < 25; frame++) {
+    updateBot(blue, 0.016, frame * 16);
+    updateBot(red, 0.016, frame * 16);
+  }
+  assert.ok(blue.y > 112 + 10, 'blue should follow its route toward the corner');
+  assert.ok(red.x < 144 - 10, 'red should follow its route toward the corner');
 });

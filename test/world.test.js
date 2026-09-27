@@ -184,6 +184,65 @@ test('opposing bots move around a close corner instead of stopping at the wall',
   }
   assert.ok(blue.y > 112 + 10, 'blue should follow its route toward the corner');
   assert.ok(red.x < 144 - 10, 'red should follow its route toward the corner');
+  let gainedFiringLane = false;
+  for (let frame = 25; frame < 190; frame++) {
+    updateBot(blue, 0.016, frame * 16);
+    updateBot(red, 0.016, frame * 16);
+    if (firingLaneClear(blue, red)) { gainedFiringLane = true; break; }
+  }
+  assert.ok(gainedFiringLane, 'bots should round the corner and gain a firing lane');
+});
+
+test('bots prefer an exposed opponent over a closer one behind a corner', () => {
+  const { state, updateBot } = loadGameLogic();
+  const map = Array.from({ length: 9 }, () => Array(9).fill(1));
+  for (let y = 1; y <= 6; y++) map[y][2] = 0;
+  for (let x = 2; x <= 6; x++) map[5][x] = 0;
+  state.world = { w: 9, h: 9, tile: 32, map };
+  state.mode = 'pvp';
+  state.player = { alive: false, team: 'blue', x: 0, y: 0 };
+  state.loot = [];
+  state.bullets = [];
+  state.particles = [];
+  const bot = (team, x, y) => ({ team, x, y, r: 10, hp: 100, maxHp: 100, speed: 0, alive: true, ai: true, inventory: [0, null, null, null], active: 0, ammo: {}, think: 0, fireTime: Infinity });
+  const blue = bot('blue', 2.5 * 32, 3.5 * 32);
+  const hidden = bot('red', 4.5 * 32, 5.5 * 32);
+  const exposed = bot('red', 2.5 * 32, 6.5 * 32);
+  state.bots = [blue, hidden, exposed];
+  assert.ok(Math.hypot(blue.x - hidden.x, blue.y - hidden.y) < Math.hypot(blue.x - exposed.x, blue.y - exposed.y));
+  updateBot(blue, .016, 1000);
+  assert.equal(blue.target, exposed);
+});
+
+test('bots retarget the opponent shooting at or hitting them', () => {
+  const { state, updateBot, shoot, hit } = loadGameLogic();
+  state.world = { w: 12, h: 9, tile: 32, map: Array.from({ length: 9 }, (_, y) => Array.from({ length: 12 }, (_, x) => x === 0 || y === 0 || x === 11 || y === 8 ? 1 : 0)) };
+  state.mode = 'pvp';
+  state.player = { alive: false, team: 'blue', x: 0, y: 0 };
+  state.loot = [];
+  state.bullets = [];
+  state.particles = [];
+  const bot = (team, x, y) => ({ team, x, y, r: 10, hp: 100, maxHp: 100, speed: 0, alive: true, ai: true, inventory: [0, null, null, null], active: 0, ammo: {}, think: 0, fireTime: Infinity });
+  const blue = bot('blue', 4.5 * 32, 3.5 * 32);
+  const first = bot('red', 6.5 * 32, 3.5 * 32);
+  const attacker = bot('red', 4.5 * 32, 6.5 * 32);
+  state.bots = [blue, first, attacker];
+  updateBot(blue, .016, 1000);
+  assert.equal(blue.target, first);
+
+  shoot(attacker, -Math.PI / 2, 1016);
+  assert.equal(blue.think, 0, 'an aimed shot should prompt a new target decision even if it misses');
+  updateBot(blue, .016, 1032);
+  assert.equal(blue.target, attacker);
+  assert.ok(Math.abs(blue.angle - Math.PI / 2) < .01);
+
+  state.elapsed = 4;
+  blue.target = first;
+  blue.think = 1;
+  hit(blue, 5, attacker);
+  assert.equal(blue.think, 0, 'a hit should force an immediate target decision');
+  updateBot(blue, .016, 1048);
+  assert.equal(blue.target, attacker);
 });
 
 test('hostile bots and monsters acquire the player only within sight range and without walls', () => {

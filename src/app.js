@@ -26,6 +26,7 @@ const LOOT_TABLE = [
 ];
 const SUPPLY_LOOT = LOOT_TABLE.filter(item=>item.type!=='weapon');
 const PLAYER_SIGHT_RANGE = 320;
+const BOT_SIGHT_RANGE = 420;
 const LOOT_RESPAWN_SECONDS = 12;
 const GRENADE_THROW_DISTANCE = 210;
 const MELEE_SWING_MS = 300;
@@ -183,12 +184,24 @@ function shoot(entity,angle,now){
     const a=angle+rand(-w.spread,w.spread);
     state.bullets.push({x:entity.x+Math.cos(a)*15,y:entity.y+Math.sin(a)*15,vx:Math.cos(a)*w.speed,vy:Math.sin(a)*w.speed,owner:entity,damage:w.damage,life:1.3,color:w.color});
   }
+  if(state.mode==='pvp')for(const bot of state.bots){
+    if(!bot.alive||bot===entity||bot.team===entity.team||dist(bot,entity)>BOT_SIGHT_RANGE)continue;
+    const towardBot=Math.atan2(bot.y-entity.y,bot.x-entity.x);
+    if(Math.abs(angleDiff(towardBot,angle))>.28||!lineClear(entity,bot)||(entity===state.player&&!canSeePlayer(bot)))continue;
+    bot.recentAttacker=entity;bot.attackedAt=state.elapsed;bot.think=0;
+  }
   muzzle(entity.x+Math.cos(angle)*16,entity.y+Math.sin(angle)*16,w.color);
   sound(entity===state.player?215:150,'square',.04,entity===state.player?.022:.008);
   if(entity===state.player)renderWeapons();
 }
 function angleDiff(a,b){return Math.atan2(Math.sin(a-b),Math.cos(a-b));}
-function hit(target,damage,source){if(!target.alive||target.invuln>0)return;target.hitFlash=.12;let rest=damage;if(target.armor){const absorb=Math.min(target.armor,rest*.64);target.armor-=absorb;rest-=absorb;}target.hp-=rest;burst(target.x,target.y,target.team==='red'||target.type==='monster'?'#f2745e':'#c0ef75',3);if(target.hp<=0){target.hp=0;target.alive=false;burst(target.x,target.y,target.type==='monster'?'#c25e48':target.team==='blue'?'#72a9ed':'#f2745e',15);sound(80,'triangle',.13,.025);if(target===state.player){log('Operator down.','danger');if(state.mode==='pvp'){dropPlayerLoadout();if(source?.team&&source.team!==target.team){if(target.team==='blue')state.scoreRed++;else state.scoreBlue++;}target.respawn=2.1;setBanner('OPERATOR DOWN · RESPAWNING');}return;}if(state.mode==='pvp'&&target.ai){dropBotLoadout(target);target.respawn=2.4;}if(source===state.player){state.kills++;$('#kill-count').textContent=String(state.kills);state.player.kills++;if(state.mode==='pvp'){if(target.team==='blue')state.scoreRed++;else state.scoreBlue++;}const victim=target.type==='monster'?`${target.variant||'monster'} neutralized`:target.team?.toUpperCase()+' unit eliminated';log(`${victim}.`,'good');announce(target.type==='monster'?`${(target.variant||'MONSTER').toUpperCase()} NEUTRALIZED`:'ENEMY ELIMINATED');}else if(state.mode==='pvp'){if(target.team==='blue')state.scoreRed++;else state.scoreBlue++;}}}
+function hit(target,damage,source){if(!target.alive||target.invuln>0)return;target.hitFlash=.12;if(target.ai&&source?.alive&&source.team!==target.team){target.recentAttacker=source;target.attackedAt=state.elapsed;target.think=0;}let rest=damage;if(target.armor){const absorb=Math.min(target.armor,rest*.64);target.armor-=absorb;rest-=absorb;}target.hp-=rest;burst(target.x,target.y,target.team==='red'||target.type==='monster'?'#f2745e':'#c0ef75',3);if(target.hp<=0){target.hp=0;target.alive=false;burst(target.x,target.y,target.type==='monster'?'#c25e48':target.team==='blue'?'#72a9ed':'#f2745e',15);sound(80,'triangle',.13,.025);if(target===state.player){log('Operator down.','danger');if(state.mode==='pvp'){dropPlayerLoadout();if(source?.team&&source.team!==target.team){if(target.team==='blue')state.scoreRed++;else state.scoreBlue++;}target.respawn=2.1;setBanner('OPERATOR DOWN · RESPAWNING');}return;}if(state.mode==='pvp'&&target.ai){dropBotLoadout(target);target.respawn=2.4;}if(source===state.player){state.kills++;$('#kill-count').textContent=String(state.kills);state.player.kills++;if(state.mode==='pvp'){if(target.team==='blue')state.scoreRed++;else state.scoreBlue++;}const victim=target.type==='monster'?`${target.variant||'monster'} neutralized`:target.team?.toUpperCase()+' unit eliminated';log(`${victim}.`,'good');announce(target.type==='monster'?`${(target.variant||'MONSTER').toUpperCase()} NEUTRALIZED`:'ENEMY ELIMINATED');}else if(state.mode==='pvp'){if(target.team==='blue')state.scoreRed++;else state.scoreBlue++;}}}
+function botTargetScore(bot,target){
+  const distance=dist(bot,target),visible=distance<=BOT_SIGHT_RANGE&&lineClear(bot,target);
+  const firing=visible&&firingLaneClear(bot,target);
+  const attacker=target===bot.recentAttacker&&state.elapsed-(bot.attackedAt??-Infinity)<3;
+  return (attacker?1600:0)+(firing?1000:visible?550:0)-distance;
+}
 function botWeaponScore(id,target,d,clear){const w=WEAPONS[id];if(!w)return-100;if(w.kind==='melee')return clear&&d<145?105+w.damage/10:-35;if(!clear)return 2;let score=35+w.damage/8;if(w.family===2)score+=d<175?40:-25;if(w.family===1)score+=d<300?24:-10;if(w.family===3)score+=d>190?28:-8;if(w.family===0)score+=d>260?8:-3;return score;}
 function botWeaponSlot(bot,weaponId){
   const free=bot.inventory.findIndex(value=>value==null);
@@ -232,11 +245,12 @@ function updateBot(bot,dt,now){
     bot.think=rand(.24,.4);
     const enemies=state.bots.filter(other=>other.alive&&other.team!==bot.team);
     if(state.player.team!==bot.team&&canSeePlayer(bot))enemies.push(state.player);
-    bot.target=enemies.sort((a,b)=>dist(bot,a)-dist(bot,b))[0]||null;
+    bot.target=enemies.sort((a,b)=>botTargetScore(bot,b)-botTargetScore(bot,a))[0]||null;
     bot.pathPoint=bot.target?nextPathStep(bot,bot.target):null;
     const nearest=state.loot.filter(item=>botCanTakeLoot(bot,item)).sort((a,b)=>dist(bot,a)-dist(bot,b))[0];
     const targetDistance=bot.target?dist(bot,bot.target):Infinity;
-    bot.pickupTarget=nearest&&dist(bot,nearest)<145&&targetDistance>185?nearest:null;
+    const underFire=bot.recentAttacker?.alive&&state.elapsed-(bot.attackedAt??-Infinity)<3;
+    bot.pickupTarget=!underFire&&nearest&&dist(bot,nearest)<145&&targetDistance>185?nearest:null;
     bot.pickupPath=bot.pickupTarget?nextPathStep(bot,bot.pickupTarget):null;
     bot.wanderAngle=rand(-Math.PI,Math.PI);bot.wanderUntil=now+rand(500,1600);
   }
@@ -264,8 +278,14 @@ function lineClear(a,b,radius=7){const d=dist(a,b),steps=Math.ceil(d/6);for(let 
 function canSeePlayer(actor){return state.player?.alive&&dist(actor,state.player)<=PLAYER_SIGHT_RANGE&&lineClear(actor,state.player);}
 function firingLaneClear(actor,target){if(!lineClear(actor,target))return false;const angle=Math.atan2(target.y-actor.y,target.x-actor.x),muzzle={x:actor.x+Math.cos(angle)*15,y:actor.y+Math.sin(angle)*15};return !blocked(muzzle.x,muzzle.y)&&lineClear(muzzle,target);}
 function nextPathStep(actor,target){const w=state.world.w,h=state.world.h,toIndex=(x,y)=>y*w+x;let sx=clamp(Math.floor(actor.x/32),1,w-2),sy=clamp(Math.floor(actor.y/32),1,h-2),gx=clamp(Math.floor(target.x/32),1,w-2),gy=clamp(Math.floor(target.y/32),1,h-2);if(!floorTile(gx,gy)){let found=false;for(let radius=1;radius<=3&&!found;radius++)for(let y=gy-radius;y<=gy+radius&&!found;y++)for(let x=gx-radius;x<=gx+radius;x++)if(floorTile(x,y)){gx=x;gy=y;found=true;break;}if(!found)return target;}const start=toIndex(sx,sy),goal=toIndex(gx,gy),parents=new Int32Array(w*h).fill(-2),queue=new Int32Array(w*h);let head=0,tail=0;queue[tail++]=start;parents[start]=start;const dirs=[[1,0],[-1,0],[0,1],[0,-1]];while(head<tail&&parents[goal]===-2){const here=queue[head++],x=here%w,y=Math.floor(here/w);for(const[dx,dy]of dirs){const nx=x+dx,ny=y+dy,next=toIndex(nx,ny);if(nx<1||ny<1||nx>=w-1||ny>=h-1||parents[next]!==-2||!floorTile(nx,ny))continue;parents[next]=here;queue[tail++]=next;}}if(parents[goal]===-2)return target;let step=goal;while(parents[step]!==start&&step!==start)step=parents[step];return{x:(step%w+.5)*32,y:(Math.floor(step/w)+.5)*32};}
-function steerToward(actor,target,pathPoint,speed,dt){const clear=lineClear(actor,target,Math.max(7,(actor.r||8)-1)),point=clear?target:pathPoint||target,dx=point.x-actor.x,dy=point.y-actor.y,d=Math.hypot(dx,dy),beforeX=actor.x,beforeY=actor.y;if(d>5)move(actor,dx/d*speed*dt,dy/d*speed*dt);if(!clear&&Math.hypot(actor.x-beforeX,actor.y-beforeY)<.15){actor.stuckTime=(actor.stuckTime||0)+dt;if(actor.stuckTime>.35){const side=actor.stuckSide||1,nx=-dy/(d||1)*speed*dt*1.8*side,ny=dx/(d||1)*speed*dt*1.8*side;move(actor,nx,ny);if(Math.hypot(actor.x-beforeX,actor.y-beforeY)<.15){move(actor,-nx,-ny);actor.stuckSide=-side;}actor.stuckTime=0;actor.think=0;}}else actor.stuckTime=0;}
-function respawnBot(b){const zone=state.world.spawnZones[b.team==='blue'?0:1],p=findOpen(zone.x/32,zone.y/32,0,5);b.x=p.x;b.y=p.y;b.hp=100;b.armor=25;b.alive=true;b.invuln=.55;b.respawn=0;b.inventory=[0,1,null,null];b.pickedSlots=[false,false,false,false];b.pickedArmor=false;b.active=0;b.ammo[1]=30;b.fireTime=performance.now()+500;}
+function steerToward(actor,target,pathPoint,speed,dt){
+  const clear=lineClear(actor,target,Math.max(7,(actor.r||8)-1));
+  if(!clear&&pathPoint&&dist(actor,pathPoint)<12){actor.think=0;pathPoint=nextPathStep(actor,target);if(target===actor.target)actor.pathPoint=pathPoint;else if(target===actor.pickupTarget)actor.pickupPath=pathPoint;}
+  const point=clear?target:pathPoint||target,dx=point.x-actor.x,dy=point.y-actor.y,d=Math.hypot(dx,dy),beforeX=actor.x,beforeY=actor.y;
+  if(d>5)move(actor,dx/d*speed*dt,dy/d*speed*dt);
+  if(!clear&&Math.hypot(actor.x-beforeX,actor.y-beforeY)<.15){actor.stuckTime=(actor.stuckTime||0)+dt;if(actor.stuckTime>.35){const side=actor.stuckSide||1,nx=-dy/(d||1)*speed*dt*1.8*side,ny=dx/(d||1)*speed*dt*1.8*side;move(actor,nx,ny);if(Math.hypot(actor.x-beforeX,actor.y-beforeY)<.15){move(actor,-nx,-ny);actor.stuckSide=-side;}actor.stuckTime=0;actor.think=0;}}else actor.stuckTime=0;
+}
+function respawnBot(b){const zone=state.world.spawnZones[b.team==='blue'?0:1],p=findOpen(zone.x/32,zone.y/32,0,5);b.x=p.x;b.y=p.y;b.hp=100;b.armor=25;b.alive=true;b.invuln=.55;b.respawn=0;b.inventory=[0,1,null,null];b.pickedSlots=[false,false,false,false];b.pickedArmor=false;b.active=0;b.target=null;b.recentAttacker=null;b.pathPoint=null;b.think=0;b.ammo[1]=30;b.fireTime=performance.now()+500;}
 function respawnPlayer(){const p=state.player,zone=state.world.spawnZones[p.team==='blue'?0:1],pos=findOpen(zone.x/32,zone.y/32,0,5);p.x=pos.x;p.y=pos.y;p.hp=100;p.armor=25;p.alive=true;p.invuln=.65;p.respawn=0;announce('OPERATOR BACK IN THE FIGHT');renderWeapons();}
 function burst(x,y,color,n){for(let i=0;i<n;i++)state.particles.push({x,y,vx:rand(-95,95),vy:rand(-95,95),life:rand(.12,.42),max:.42,color,r:rand(1,3)});}
 function muzzle(x,y,color){for(let i=0;i<3;i++)state.particles.push({x,y,vx:rand(-30,30),vy:rand(-30,30),life:.07,max:.07,color,r:rand(2,4)});}

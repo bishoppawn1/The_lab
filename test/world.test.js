@@ -9,7 +9,7 @@ const definitions = source.slice(0, source.indexOf("$('#select-survival').addEve
 function loadGameLogic() {
   const element = { getContext: () => ({}) };
   const context = { document: { querySelector: () => element } };
-  vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, generateWorld, spawnLoot, takeLoot, respawnLoot, firingLaneClear, updateBot, updateEnemy };`, context);
+  vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, generateWorld, spawnLoot, takeLoot, respawnLoot, firingLaneClear, updateBot, updateEnemy, botPickupLoot, hit, shoot };`, context);
   return context.lab;
 }
 
@@ -83,6 +83,22 @@ test('collected world loot returns to its original location', () => {
   assert.equal(returned.type, pickup.type);
   respawnLoot();
   assert.equal(state.loot.filter(item => item.spawnId === pickup.spawnId).length, 1);
+});
+
+test('both arena teams have a melee pickup to discover', () => {
+  const { state, generateWorld, spawnLoot } = loadGameLogic();
+  state.mode = 'pvp';
+  generateWorld('pvp');
+  state.player = { alive: false, x: 0, y: 0, r: 11 };
+  state.bots = [];
+  state.enemies = [];
+  spawnLoot(18);
+  for (let team = 0; team < 2; team++) {
+    const pickup = state.loot[team];
+    assert.equal(pickup.type, 'weapon');
+    assert.ok([4, 5, 6].includes(pickup.weapon));
+    assert.ok(Math.hypot(pickup.x - state.world.spawnZones[team].x, pickup.y - state.world.spawnZones[team].y) <= 8 * 32);
+  }
 });
 
 test('opening another operation after a result hides the old game and result', () => {
@@ -180,4 +196,74 @@ test('hostile bots and monsters acquire the player only within sight range and w
   monster.think = 0;
   updateEnemy(monster, 0.016, 1080);
   assert.equal(monster.target, null, 'monster should lose a distant player');
+});
+
+test('bots drop collected weapons and supplies once when eliminated', () => {
+  const { state, botPickupLoot, hit } = loadGameLogic();
+  state.world = { tile: 32, map: Array.from({ length: 8 }, () => Array(8).fill(0)) };
+  state.mode = 'pvp';
+  state.player = { alive: false, team: 'blue', x: 200, y: 200 };
+  state.enemies = [];
+  state.particles = [];
+  state.lootRespawns = [];
+  state.loot = [
+    { x: 80, y: 80, type: 'weapon', weapon: 4, label: 'KNIFE', color: '#c4d0c7' },
+    { x: 80, y: 80, type: 'grenade', label: 'GRENADE', color: '#dd8e68' },
+    { x: 80, y: 80, type: 'armor', label: 'ARMOR', color: '#78b5de' },
+  ];
+  const red = { x: 80, y: 80, r: 10, hp: 20, maxHp: 100, armor: 0, team: 'red', alive: true, ai: true, inventory: [0, 1, null, null], active: 0, ammo: { 1: 30 }, pickedSlots: [false, false, false, false] };
+  const blue = { x: 120, y: 80, team: 'blue' };
+  state.bots = [red];
+  botPickupLoot(red);
+  botPickupLoot(red);
+  botPickupLoot(red);
+  assert.equal(state.loot.length, 0);
+  assert.equal(red.inventory[2], 4);
+  assert.equal(red.inventory[3].item, 'grenade');
+  hit(red, 70, blue);
+  assert.equal(red.alive, false);
+  assert.deepEqual(state.loot.map(item => item.type).sort(), ['armor', 'grenade', 'weapon']);
+  assert.equal(state.loot.find(item => item.type === 'weapon').weapon, 4);
+  assert.equal(state.loot.find(item => item.type === 'grenade').count, 1);
+  hit(red, 70, blue);
+  assert.equal(state.loot.length, 3, 'dead bots must not drop the same gear twice');
+});
+
+test('melee bots close into range and their swing can hit the player', () => {
+  const { state, updateBot, shoot } = loadGameLogic();
+  state.world = { w: 12, h: 8, tile: 32, map: Array.from({ length: 8 }, () => Array(12).fill(0)) };
+  state.mode = 'pvp';
+  state.loot = [];
+  state.particles = [];
+  state.bullets = [];
+  state.player = { x: 180, y: 80, r: 11, hp: 100, maxHp: 100, armor: 0, invuln: 0, alive: true, team: 'blue' };
+  const red = { x: 80, y: 80, r: 10, speed: 100, hp: 100, maxHp: 100, alive: true, team: 'red', inventory: [0, 1, 4, null], active: 1, ammo: {}, think: 0, fireTime: Infinity, invuln: 0, hitFlash: 0 };
+  state.bots = [red];
+  updateBot(red, 0.016, 1000);
+  assert.equal(red.active, 2, 'bot should select its knife nearby');
+  assert.ok(red.x > 80, 'melee bot should move toward striking distance');
+  red.x = 135;
+  shoot(red, 0, 1100);
+  assert.equal(state.player.hp, 62);
+  assert.equal(red.swingStarted, 1100);
+  assert.equal(red.swingUntil, 1400);
+});
+
+test('melee rendering sweeps the weapon through different angles', () => {
+  const rotations = [];
+  const context2d = new Proxy({ globalAlpha: 1 }, {
+    get(target, key) { return key in target ? target[key] : (...args) => { if (key === 'rotate') rotations.push(args[0]); }; },
+    set(target, key, value) { target[key] = value; return true; },
+  });
+  const context = { document: { querySelector: () => ({ getContext: () => context2d }) } };
+  vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, drawEntity };`, context);
+  const { state, drawEntity } = context.lab;
+  state.camera = { x: 0, y: 0 };
+  const fighter = { x: 80, y: 80, r: 10, hp: 100, maxHp: 100, angle: 0, invuln: 0, inventory: [4], active: 0, swingStarted: 1000, swingUntil: 1300 };
+  drawEntity(fighter, '#c0ef75', 1020, '');
+  const earlySwing = rotations.at(-1);
+  rotations.length = 0;
+  drawEntity(fighter, '#c0ef75', 1260, '');
+  const lateSwing = rotations.at(-1);
+  assert.ok(earlySwing < lateSwing, 'the held knife should visibly sweep during the strike');
 });

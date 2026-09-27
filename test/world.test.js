@@ -7,10 +7,10 @@ const source = readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
 const definitions = source.slice(0, source.indexOf("$('#select-survival').addEventListener"));
 
 function loadGameLogic(random) {
-  const element = { getContext: () => ({}) };
-  const context = { document: { querySelector: () => element } };
+  const element = { getContext: () => ({}), classList: { add() {}, remove() {} } };
+  const context = { document: { querySelector: () => element }, performance: { now: () => 1000 } };
   if (random) context.Math = Object.assign(Object.create(Math), { random });
-  vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, WEAPONS, generateWorld, spawnLoot, takeLoot, respawnLoot, firingLaneClear, updateBot, updateEnemy, botCanTakeLoot, botPickupLoot, hit, shoot, advanceBullet };`, context);
+  vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, WEAPONS, generateWorld, spawnLoot, takeLoot, respawnLoot, blocked, lineClear, interact, unlockDoor, updateVision, seedRoomThreats, spawnEnemy, firingLaneClear, updateBot, updateEnemy, botCanTakeLoot, botPickupLoot, hit, shoot, advanceBullet };`, context);
   return context.lab;
 }
 
@@ -52,6 +52,8 @@ test('generated rooms remain connected across different layouts', () => {
     assert.equal(world.w, 160);
     assert.equal(world.h, 116);
     assert.equal(world.rooms.length, 18);
+    assert.equal(world.doors.length, 18);
+    assert.equal(world.doors.filter(door => !door.open).length, 17);
     for (const y of world.corridors.horizontal) {
       for (let x = 7; x <= world.w - 8; x++) assert.equal(world.map[y][x], 0, `main corridor at ${x},${y} must stay open`);
     }
@@ -105,10 +107,85 @@ test('larger maps receive more supplies without flooding them with weapons', () 
     state.mode = mode;
     generateWorld(mode);
     spawnLoot(count);
-    assert.equal(state.loot.length, count);
-    assert.ok(state.loot.slice(weaponLimit).every(item => item.type !== 'weapon'), `${mode} extra pickup sites should contain supplies`);
-    assert.equal(new Set(state.loot.map(item => item.spawnId)).size, count);
+    assert.equal(state.loot.length, count + 13);
+    assert.ok(state.loot.slice(weaponLimit, count).every(item => item.type !== 'weapon'), `${mode} extra random pickup sites should contain supplies`);
+    assert.equal(new Set(state.loot.map(item => item.spawnId)).size, count + 13);
+    const armory = state.world.rooms.find(room => room.name === 'ARMORY');
+    assert.equal(state.loot.filter(item => item.room === armory.name && item.type === 'weapon').length, 4, 'armory should hold a reliable weapon cache');
+    const medical = state.world.rooms.find(room => room.name === 'MEDICAL');
+    assert.equal(state.loot.filter(item => item.room === medical.name && item.type === 'health').length, 3);
   }
+});
+
+test('closed room doors block movement and sight until unlocked in both modes', () => {
+  const { state, generateWorld, blocked, lineClear, unlockDoor, updateVision } = loadGameLogic();
+  for (const mode of ['survival', 'pvp']) {
+    state.mode = mode;
+    generateWorld(mode);
+    const door = state.world.doors.find(item => item.room.name === 'ARMORY');
+    const inside = { x: door.cx, y: door.cy + (door.approach.y > door.cy ? -32 : 32) };
+    state.player = { ...door.approach, alive: true, team: 'blue' };
+    state.bots = [];
+    state.enemies = [];
+    assert.equal(blocked(door.cx, door.cy, 2), true);
+    assert.equal(lineClear(door.approach, inside), false);
+    updateVision(1000);
+    assert.equal(state.world.visible.has(`${Math.floor(inside.x / 32)},${Math.floor(inside.y / 32)}`), false);
+    assert.equal(unlockDoor(door), true);
+    assert.equal(blocked(door.cx, door.cy, 2), false);
+    assert.equal(lineClear(door.approach, inside), true);
+    updateVision(1200);
+    assert.equal(state.world.visible.has(`${Math.floor(inside.x / 32)},${Math.floor(inside.y / 32)}`), true);
+  }
+});
+
+test('the player unlocks a nearby door with interact and arena bots open doors on approach', () => {
+  const { state, generateWorld, interact, updateBot } = loadGameLogic();
+  state.mode = 'survival';
+  generateWorld('survival');
+  const survivalDoor = state.world.doors.find(door => door.room.name === 'MEDICAL');
+  state.player = { ...survivalDoor.approach, alive: true, team: 'blue' };
+  state.loot = [];
+  state.bots = [];
+  state.enemies = [];
+  interact();
+  assert.equal(survivalDoor.open, true);
+
+  state.mode = 'pvp';
+  generateWorld('pvp');
+  const arenaDoor = state.world.doors.find(door => door.room.name === 'ARMORY');
+  state.player = { alive: false, team: 'blue', x: 0, y: 0 };
+  const bot = { ...arenaDoor.approach, team: 'blue', alive: true, r: 10, hp: 100, maxHp: 100, speed: 0, inventory: [0, 1, null, null], active: 0, ammo: {}, think: 0, fireTime: Infinity };
+  state.bots = [bot];
+  updateBot(bot, .016, 1000);
+  assert.equal(arenaDoor.open, true);
+});
+
+test('survival threat rooms are populated while passive rooms remain quiet', () => {
+  const { state, generateWorld, seedRoomThreats, spawnEnemy } = loadGameLogic();
+  state.mode = 'survival';
+  state.settings.difficulty = 'standard';
+  generateWorld('survival');
+  state.player = { alive: false, team: 'blue', x: 0, y: 0 };
+  state.bots = [];
+  state.enemies = [];
+  seedRoomThreats();
+  const count = name => state.enemies.filter(enemy => enemy.room === name).length;
+  assert.equal(count('NEST CHAMBER'), 5);
+  assert.equal(count('SPECIMEN HOLD'), 3);
+  assert.equal(count('QUARANTINE'), 2);
+  assert.equal(count('OBSERVATION'), 0);
+  assert.equal(count('ARCHIVES'), 0);
+  for (const enemy of state.enemies) {
+    const room = state.world.rooms.find(item => item.name === enemy.room);
+    assert.ok(enemy.x > room.x * 32 && enemy.x < (room.x + room.w) * 32);
+    assert.ok(enemy.y > room.y * 32 && enemy.y < (room.y + room.h) * 32);
+  }
+  const roaming = state.enemies.length;
+  spawnEnemy('monster');
+  assert.equal(state.enemies.length, roaming + 1);
+  const scout = state.enemies.at(-1);
+  assert.ok(state.world.rooms.every(room => scout.x < room.x * 32 || scout.x >= (room.x + room.w) * 32 || scout.y < room.y * 32 || scout.y >= (room.y + room.h) * 32), 'roaming threats should start in corridors');
 });
 
 test('both arena teams have a melee pickup to discover', () => {

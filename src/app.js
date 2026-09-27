@@ -40,7 +40,7 @@ const GRENADE_THROW_DISTANCE = 210;
 const MELEE_SWING_MS = 300;
 function weightedLoot(table=LOOT_TABLE){let value=Math.random()*table.reduce((sum,item)=>sum+item.weight,0);for(const item of table){value-=item.weight;if(value<=0)return item;}return table.at(-1);}
 
-const state = {running:false,paused:false,runId:0,mode:'survival',world:null,player:null,bots:[],enemies:[],bullets:[],loot:[],lootRespawns:[],particles:[],decor:[],keys:new Set(),mouse:{x:0,y:0,down:false},touchFire:false,camera:{x:0,y:0},lastTime:0,elapsed:0,fireAt:0,round:1,spawnTimer:0,scoreBlue:0,scoreRed:0,kills:0,found:0,skips:0,teamSize:5,feed:[],visibleMap:false,roundEnd:false,botFill:true,pendingLoot:null,settings:{team:'blue',target:50}};
+const state = {running:false,paused:false,runId:0,mode:'survival',world:null,player:null,bots:[],enemies:[],bullets:[],loot:[],lootRespawns:[],particles:[],decor:[],roomProps:[],keys:new Set(),mouse:{x:0,y:0,down:false},touchFire:false,camera:{x:0,y:0},lastTime:0,elapsed:0,fireAt:0,round:1,spawnTimer:0,scoreBlue:0,scoreRed:0,kills:0,found:0,skips:0,teamSize:5,feed:[],visibleMap:false,roundEnd:false,botFill:true,pendingLoot:null,settings:{team:'blue',target:50}};
 let lastNotice=0, audioContext=null;
 const rand=(a,b)=>a+Math.random()*(b-a), clamp=(n,a,b)=>Math.max(a,Math.min(b,n)), dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y), choice=a=>a[Math.floor(Math.random()*a.length)];
 
@@ -56,17 +56,16 @@ function generateWorld(mode){
   const corridors={horizontal:[34,82],vertical:[26,76,126]};
   for(const y of corridors.horizontal)carve(7,y-1,w-8,y+1);
   for(const x of corridors.vertical)carve(x,34,x+2,82);
-  const columns=[14,39,64,89,114,139],rows=[15,58,101],rooms=[];
+  const columns=[14,39,64,89,114,139],rows=[15,58,101],rooms=[],doors=[];
   for(let row=0;row<3;row++)for(let col=0;col<6;col++){
     const index=row*6+col,rw=Math.floor(rand(11,17)),rh=Math.floor(rand(11,16));
     const cx=columns[col]+Math.floor(rand(-2,3)),cy=rows[row]+Math.floor(rand(-2,3));
     const room={x:Math.floor(cx-rw/2),y:Math.floor(cy-rh/2),w:rw,h:rh,name:index===0?'ENTRY BAY':index===17?'EXTRACTION BAY':names[index-1]};
     rooms.push(room);carve(room.x+1,room.y+1,room.x+rw-2,room.y+rh-2);
-    const door=room.x+Math.floor(rand(3,room.w-4));
-    if(row===0)carve(door,room.y+room.h-1,door+1,corridors.horizontal[0]);
-    else if(row===2)carve(door,corridors.horizontal[1],door+1,room.y);
-    else if(Math.random()<.5)carve(door,corridors.horizontal[0],door+1,room.y);
-    else carve(door,room.y+room.h-1,door+1,corridors.horizontal[1]);
+    const doorX=room.x+Math.floor(rand(3,room.w-4)),south=row===0||row===1&&Math.random()<.5;
+    const boundaryY=south?room.y+room.h-1:room.y,corridorY=row===0?corridors.horizontal[0]:row===2?corridors.horizontal[1]:south?corridors.horizontal[1]:corridors.horizontal[0];
+    carve(doorX,Math.min(boundaryY,corridorY),doorX+1,Math.max(boundaryY,corridorY));
+    doors.push({x:doorX,y:boundaryY,cx:(doorX+1)*32,cy:(boundaryY+.5)*32,room,open:index===0,approach:{x:(doorX+1)*32,y:(boundaryY+(south?1.5:-.5))*32}});
   }
   for(const room of rooms)if(Math.random()<.68){for(let attempt=0;attempt<8;attempt++){
     const x=Math.floor(rand(room.x+3,room.x+room.w-4)),y=Math.floor(rand(room.y+3,room.y+room.h-4));
@@ -75,10 +74,17 @@ function generateWorld(mode){
   }}
   const center=room=>({x:(room.x+Math.floor(room.w/2)+.5)*32,y:(room.y+Math.floor(room.h/2)+.5)*32});
   const start=center(rooms[0]),end=center(rooms[17]);
-  state.world={w,h,map,tile:32,mode,rooms,corridors,exit:{...end,r:39},spawnZones:[start,end],explored:new Set(),visible:new Set(),visionAt:0,labels:rooms.map(room=>({...center(room),text:room.name}))};
+  const doorTiles=new Map();for(const door of doors)for(let dx=0;dx<2;dx++)doorTiles.set(`${door.x+dx},${door.y}`,door);
+  state.world={w,h,map,tile:32,mode,rooms,doors,doorTiles,corridors,exit:{...end,r:39},spawnZones:[start,end],explored:new Set(),visible:new Set(),visionAt:0,labels:rooms.map(room=>({...center(room),text:room.name}))};
   state.decor=[];for(let i=0;i<650;i++){const x=rand(2,w-2),y=rand(2,h-2);if(floorTile(Math.floor(x),Math.floor(y)))state.decor.push({x:(x+.5)*32,y:(y+.5)*32,r:rand(1,4),alpha:rand(.04,.15),kind:Math.random()>.5?'stain':'debris'});}
+  const themes={'ARMORY':['rack',5],'MEDICAL':['bed',4],'NEST CHAMBER':['nest',6],'SPECIMEN HOLD':['tank',4],'QUARANTINE':['tank',3],'STORAGE':['crate',5],'WORKSHOP':['bench',4],'RESEARCH LAB':['console',4],'CONTROL ROOM':['console',5],'SERVER ROOM':['server',5],'POWER STATION':['generator',3],'OBSERVATION':['console',3],'CHEMISTRY':['tank',3],'MAINTENANCE':['crate',3],'ARCHIVES':['shelf',5],'GENERATOR':['generator',4]};
+  state.roomProps=[];for(const room of rooms){const [kind,count]=themes[room.name]||[];if(!kind)continue;for(let i=0;i<count;i++)for(let attempt=0;attempt<40;attempt++){
+    const tx=Math.floor(rand(room.x+2,room.x+room.w-2)),ty=Math.floor(rand(room.y+2,room.y+room.h-2)),x=(tx+.5)*32,y=(ty+.5)*32;
+    if(!floorTile(tx,ty)||Math.hypot(x-center(room).x,y-center(room).y)<68||state.roomProps.some(prop=>dist(prop,{x,y})<36))continue;
+    state.roomProps.push({x,y,kind});break;
+  }}
 }
-function findOpen(nearX=31,nearY=24,minDistance=0,maxDistance=Infinity){for(let i=0;i<900;i++){const tx=Math.floor(rand(1,state.world.w-1)),ty=Math.floor(rand(1,state.world.h-1)),p={x:(tx+.5)*32,y:(ty+.5)*32},d=Math.hypot(tx-nearX,ty-nearY);if(floorTile(tx,ty)&&d>=minDistance&&d<=maxDistance&&!blocked(p.x,p.y,9)&&!occupied(p,18))return p;}let fallback=null,best=Infinity;for(let y=1;y<state.world.h-1;y++)for(let x=1;x<state.world.w-1;x++){const p={x:(x+.5)*32,y:(y+.5)*32},d=(x+.5-nearX)**2+(y+.5-nearY)**2;if(d<best&&floorTile(x,y)&&!blocked(p.x,p.y,9)&&!occupied(p,18)){fallback=p;best=d;}}return fallback||{x:(nearX+.5)*32,y:(nearY+.5)*32};}
+function findOpen(nearX=31,nearY=24,minDistance=0,maxDistance=Infinity,accept=()=>true){for(let i=0;i<900;i++){const tx=Math.floor(rand(1,state.world.w-1)),ty=Math.floor(rand(1,state.world.h-1)),p={x:(tx+.5)*32,y:(ty+.5)*32},d=Math.hypot(tx-nearX,ty-nearY);if(floorTile(tx,ty)&&accept(tx,ty)&&d>=minDistance&&d<=maxDistance&&!blocked(p.x,p.y,9)&&!occupied(p,18))return p;}let fallback=null,best=Infinity;for(let y=1;y<state.world.h-1;y++)for(let x=1;x<state.world.w-1;x++){const p={x:(x+.5)*32,y:(y+.5)*32},d=(x+.5-nearX)**2+(y+.5-nearY)**2;if(d<best&&accept(x,y)&&floorTile(x,y)&&!blocked(p.x,p.y,9)&&!occupied(p,18)){fallback=p;best=d;}}return fallback||{x:(nearX+.5)*32,y:(nearY+.5)*32};}
 function occupied(p,r){return state.enemies.some(e=>e.alive&&dist(p,e)<r+e.r)||state.bots.some(b=>b.alive&&dist(p,b)<r+b.r)||state.player&&state.player.alive&&dist(p,state.player)<r+state.player.r;}
 function inventoryItemLabel(item){return item?.item==='health'?'MEDKIT':item?.item==='grenade'?'GRENADE':'ITEM';}
 function inventoryItemIcon(item){return item?.item==='health'?'<span class="inventory-item-icon medkit" aria-hidden="true">✚</span>':'<span class="inventory-item-icon grenade" aria-hidden="true">◉</span>';}
@@ -114,6 +120,28 @@ const weaponShapes=[
 ];
 function weaponIcon(id){const weapon=WEAPONS[id],detail={11:'<path d="M14 21h4v4h-4z"/>',12:'<circle cx="17" cy="20" r="5"/>',13:'<path d="M18 17h5v7h-5z"/>',14:'<path d="M29 8h7v3h-7z"/>',15:'<path d="M29 10h7v3h-7z"/>',16:'<path d="m27 8 5-5 3 2-5 6z"/>'}[id]||'';return `<svg viewBox="0 0 36 26" aria-hidden="true" class="weapon-svg ${weapon.kind}"><g fill="${weapon.color}" stroke="#172019" stroke-width=".7" stroke-linejoin="round">${weaponShapes[weapon.family]}${detail}</g></svg>`;}
 function buildPlayer(){const p={x:8.5*32,y:23.5*32,r:11,speed:176,hp:100,maxHp:100,armor:0,inventory:[0,{item:'grenade',count:1},null,null],active:0,ammo:Object.fromEntries(WEAPONS.map((w,i)=>[i,w.magazine||0])),team:state.settings.team||'blue',alive:true,angle:0,stun:0,invuln:0,hitFlash:0,fireTime:0,reloadUntil:0,respawn:0,ai:false,kills:0};if(state.settings.loadout==='assault'){p.inventory=[3,1,0,{item:'grenade',count:1}];p.active=0;}if(state.settings.loadout==='medic'){p.hp=125;p.maxHp=125;p.inventory=[0,4,{item:'health',count:2},{item:'grenade',count:1}];}if(state.mode==='pvp'){p.armor=35;p.inventory=[0,null,null,null];p.active=0;}return p;}
+function roomSpot(room,avoidLoot=false){
+  for(let attempt=0;attempt<100;attempt++){
+    const tx=Math.floor(rand(room.x+2,room.x+room.w-2)),ty=Math.floor(rand(room.y+2,room.y+room.h-2));
+    const spot={x:(tx+.5)*32,y:(ty+.5)*32};
+    if(!blocked(spot.x,spot.y,10)&&!occupied(spot,17)&&(!avoidLoot||!state.loot.some(item=>dist(item,spot)<34)))return spot;
+  }
+  return{x:(room.x+Math.floor(room.w/2)+.5)*32,y:(room.y+Math.floor(room.h/2)+.5)*32};
+}
+function addRoomLoot(room,type,weapon=null){
+  const spot=roomSpot(room,true),spec=type==='weapon'?LOOT_TABLE.find(item=>item.type==='weapon'&&item.weapon===weapon):LOOT_TABLE.find(item=>item.type===type);
+  state.loot.push({...spot,...spec,r:10,bob:rand(0,Math.PI*2),id:`${room.name}-${state.loot.length}`,room:room.name});
+}
+function seedRoomLoot(){
+  for(const room of state.world.rooms){
+    if(room.name==='ARMORY')for(const weapon of [1,2,3,choice([8,13,15])])addRoomLoot(room,'weapon',weapon);
+    else if(room.name==='MEDICAL'){for(let i=0;i<3;i++)addRoomLoot(room,'health');addRoomLoot(room,'armor');}
+    else if(room.name==='STORAGE'){addRoomLoot(room,'grenade');addRoomLoot(room,'armor');}
+    else if(room.name==='WORKSHOP')addRoomLoot(room,'weapon',16);
+    else if(room.name==='POWER STATION')addRoomLoot(room,'armor');
+    else if(room.name==='RESEARCH LAB')addRoomLoot(room,'health');
+  }
+}
 function spawnLoot(count){
   const start=state.world.spawnZones[0],near=(dx,dy)=>({x:start.x+dx*32,y:start.y+dy*32});
   state.loot=state.mode==='survival'?[{...near(2,-1),type:'health',label:'MEDKIT',color:'#90d485',r:10,bob:0,id:'medkit'},{...near(-2,1),type:'armor',label:'ARMOR',color:'#78b5de',r:10,bob:0,id:'armor'},{...near(3,2),type:'grenade',label:'GRENADE',color:'#dd8e68',r:10,bob:0,id:'grenade'}]:[];
@@ -124,16 +152,36 @@ function spawnLoot(count){
   for(let i=state.loot.length;i<count;i++){
     const spot=findOpen(),item=weightedLoot(i<(state.mode==='survival'?22:18)?LOOT_TABLE:SUPPLY_LOOT);state.loot.push({...spot,...item,r:10,bob:rand(0,Math.PI*2),id:i});
   }
+  seedRoomLoot();
   state.loot.forEach((item,index)=>item.spawnId=index);
 }
 function takeLoot(item){if(!state.loot.includes(item))return false;state.loot=state.loot.filter(loot=>loot!==item);if(item.spawnId!=null)state.lootRespawns.push({item:{...item,bob:0},at:state.elapsed+LOOT_RESPAWN_SECONDS});return true;}
 function respawnLoot(){for(let i=state.lootRespawns.length-1;i>=0;i--){const entry=state.lootRespawns[i];if(state.elapsed<entry.at)continue;if(occupied(entry.item,12)){entry.at=state.elapsed+2;continue;}state.loot.push({...entry.item,bob:rand(0,Math.PI*2)});state.lootRespawns.splice(i,1);}}
 function startGame(){clearOperationUi();state.runId++;setup.classList.add('hidden');menu.classList.add('hidden');game.classList.remove('hidden');state.elapsed=0;state.kills=0;state.found=0;state.feed=[];state.visibleMap=false;state.bullets=[];state.lootRespawns=[];state.particles=[];state.round=1;state.roundEnd=false;state.scoreBlue=0;state.scoreRed=0;state.player=null;generateWorld(state.mode);state.player=buildPlayer();state.bots=[];state.enemies=[];state.spawnTimer=0;
-  if(state.mode==='survival'){state.player.x=state.world.spawnZones[0].x;state.player.y=state.world.spawnZones[0].y;state.player.invuln=2.5;if(state.settings.difficulty==='training'){state.player.hp=state.player.maxHp=150;state.player.armor=20;}else if(state.settings.difficulty==='survival'){state.player.hp=state.player.maxHp=80;}spawnLoot(46);spawnEnemy('guard');const threatTotal=state.settings.difficulty==='training'?3:state.settings.difficulty==='survival'?7:5;for(let i=0;i<threatTotal;i++)spawnEnemy('monster');$('#mode-label').textContent='LAB ESCAPE';$('#objective-label').textContent='REACH EXTRACTION';$('#objective-detail').textContent='Explore the lab';$('#objective-detail').classList.remove('blue-text');$('#score-panel').classList.add('hidden');$('#map-status').textContent='— EXPLORE';log('You entered Facility 07-C. Find a way out.','good');log('Supplies are marked by their silhouettes. Press E to collect.','good');}
+  if(state.mode==='survival'){state.player.x=state.world.spawnZones[0].x;state.player.y=state.world.spawnZones[0].y;state.player.invuln=2.5;if(state.settings.difficulty==='training'){state.player.hp=state.player.maxHp=150;state.player.armor=20;}else if(state.settings.difficulty==='survival'){state.player.hp=state.player.maxHp=80;}spawnLoot(46);spawnEnemy('guard',state.world.rooms[0]);const threatTotal=state.settings.difficulty==='training'?2:state.settings.difficulty==='survival'?5:3;for(let i=0;i<threatTotal;i++)spawnEnemy('monster');seedRoomThreats();$('#mode-label').textContent='LAB ESCAPE';$('#objective-label').textContent='REACH EXTRACTION';$('#objective-detail').textContent='Explore the lab';$('#objective-detail').classList.remove('blue-text');$('#score-panel').classList.add('hidden');$('#map-status').textContent='— EXPLORE';log('You entered Facility 07-C. Find a way out.','good');log('Supplies are marked by their silhouettes. Press E to collect.','good');}
   else {spawnLoot(40);const playerColor=state.settings.team==='blue'?'blue':'red',enemyColor=playerColor==='blue'?'red':'blue';state.player.team=playerColor;state.player.x=state.world.spawnZones[playerColor==='blue'?0:1].x;state.player.y=state.world.spawnZones[playerColor==='blue'?0:1].y;for(let i=0;i<state.teamSize-1;i++)spawnBot(playerColor,i);for(let i=0;i<state.teamSize;i++)spawnBot(enemyColor,i);$('#mode-label').textContent=`TEAM DEATHMATCH · ${state.teamSize}V${state.teamSize}`;$('#objective-label').textContent=`FIRST TEAM TO ${state.settings.target} WINS`;$('#objective-detail').textContent=`Win ${state.settings.target} eliminations`;$('#score-target').textContent=`FIRST TO ${state.settings.target}`;$('#score-panel').classList.remove('hidden');$('#teams-line').textContent=`${state.teamSize}V${state.teamSize} · BOTS ACTIVE`;$('#map-status').textContent='— TEAM VISION';log(`${state.teamSize}v${state.teamSize} match active. AI squads deployed.`,'good');log('Collect gear, then fight for your team.');}
   $('#threat-count').textContent=state.mode==='survival'?String(state.enemies.filter(e=>e.alive&&e.type==='monster').length):String(state.bots.length+1);$('#kill-count').textContent='0';$('#loot-count').textContent='0';$('#grenade-count').textContent=String(inventoryGrenades());$('#blue-score').textContent='0';$('#red-score').textContent='0';$('#health-value').textContent=String(state.player.hp);$('#health-bar').style.width='100%';$('#armor-value').textContent=`+ ${state.player.armor} ARM`;$('#armor-bar').style.width=`${state.player.armor}%`;renderWeapons();$('#event-log').innerHTML='';updateHUD();state.running=true;state.paused=false;state.lastTime=performance.now();resizeCanvas();const runId=state.runId;requestAnimationFrame(now=>frame(now,runId));}
 function spawnBot(team,i){const zone=state.world.spawnZones[team==='blue'?0:1],pos=findOpen(zone.x/32,zone.y/32,0,7);const b={...pos,team,ai:true,alive:true,r:10,hp:100,maxHp:100,speed:rand(85,115),inventory:[0,1,null,null],pickedSlots:[false,false,false,false],pickedArmor:false,active:Math.random()<.5?0:1,ammo:{1:30},angle:0,fireTime:rand(0,500),stun:0,invuln:0,respawn:0,id:`${team}${i}`,kills:0,target:null,think:rand(0,1)};state.bots.push(b);}
-function spawnEnemy(type='monster'){const origin=state.player||{x:40*32,y:32*32},pos=findOpen(origin.x/32,origin.y/32,type==='guard'?5:15,40),hard=state.settings.difficulty==='survival',training=state.settings.difficulty==='training',variant=type==='guard'?null:choice(['crawler','crawler','brute','spitter']);const specs=type==='guard'?{r:10,hp:76,speed:72,damage:10}:{crawler:{r:9,hp:40,speed:126,damage:7},brute:{r:16,hp:142,speed:48,damage:17},spitter:{r:12,hp:64,speed:83,damage:9}}[variant];const e={...pos,type,variant,alive:true,r:specs.r,hp:specs.hp*(hard?1.2:1),maxHp:specs.hp*(hard?1.2:1),speed:specs.speed*(training?.8:hard?1.1:1),damage:specs.damage*(training?.55:hard?1.4:1),angle:0,fireTime:rand(200,900),stun:0,invuln:0,hitFlash:0,think:0,target:null,pathPoint:null,id:Math.random(),team:type==='guard'?(state.player?.team||'blue'):null};state.enemies.push(e);}
+function spawnEnemy(type='monster',room=null,chosenVariant=null){
+  const origin=state.player||{x:40*32,y:32*32};
+  const corridor=(x,y)=>!state.world.rooms.some(candidate=>x>=candidate.x&&x<candidate.x+candidate.w&&y>=candidate.y&&y<candidate.y+candidate.h);
+  const pos=room?roomSpot(room):findOpen(origin.x/32,origin.y/32,type==='guard'?5:15,40,corridor);
+  const hard=state.settings.difficulty==='survival',training=state.settings.difficulty==='training';
+  const variant=type==='guard'?null:chosenVariant||choice(['crawler','crawler','brute','spitter']);
+  const specs=type==='guard'?{r:10,hp:76,speed:72,damage:10}:{crawler:{r:9,hp:40,speed:126,damage:7},brute:{r:16,hp:142,speed:48,damage:17},spitter:{r:12,hp:64,speed:83,damage:9}}[variant];
+  const e={...pos,type,variant,room:room?.name||null,alive:true,r:specs.r,hp:specs.hp*(hard?1.2:1),maxHp:specs.hp*(hard?1.2:1),speed:specs.speed*(training?.8:hard?1.1:1),damage:specs.damage*(training?.55:hard?1.4:1),angle:0,fireTime:rand(200,900),stun:0,invuln:0,hitFlash:0,think:0,target:null,pathPoint:null,id:Math.random(),team:type==='guard'?(state.player?.team||'blue'):null};
+  state.enemies.push(e);return e;
+}
+function seedRoomThreats(){
+  const difficulty=state.settings.difficulty;
+  const count=(training,standard,hardcore)=>difficulty==='training'?training:difficulty==='survival'?hardcore:standard;
+  for(const room of state.world.rooms){
+    if(room.name==='NEST CHAMBER')for(let i=0;i<count(3,5,7);i++)spawnEnemy('monster',room,i%4===3?'brute':'crawler');
+    else if(room.name==='SPECIMEN HOLD')for(let i=0;i<count(1,3,4);i++)spawnEnemy('monster',room,i===0?'brute':'crawler');
+    else if(room.name==='QUARANTINE')for(let i=0;i<count(1,2,3);i++)spawnEnemy('monster',room,'spitter');
+    else if(room.name==='RESEARCH LAB')for(let i=0;i<count(0,1,2);i++)spawnEnemy('monster',room,'spitter');
+  }
+}
 function renderWeapons(){const p=state.player;if(!p)return;const el=$('#weapon-list');el.innerHTML='';for(let i=0;i<4;i++){const slot=p.inventory[i],isItem=slot!==null&&typeof slot==='object',id=typeof slot==='number'?slot:null,w=id===null?null:WEAPONS[id],b=document.createElement('button');b.className=`weapon-slot ${i===p.active?'active':''} ${state.pendingLoot?'replace-target':''}`;b.dataset.slot=i;b.setAttribute('aria-label',w?`Slot ${i+1}, ${w.name}${w.kind==='gun'?`, ${p.ammo[id]||0} rounds loaded, infinite reserve`:''}`:isItem?`Slot ${i+1}, ${inventoryItemLabel(slot)}, count ${slot.count}, press fire to use`:`Slot ${i+1}, empty`);const name=w?w.name.toUpperCase():isItem?`${inventoryItemLabel(slot)} ×${slot.count}`:'EMPTY SLOT',detail=w?(w.kind==='gun'?w.family===2?(w.name==='Auto Shotgun'?'AUTO SHOTGUN':w.name==='Slug Shotgun'?'SLUG SHOTGUN':'PUMP SHOTGUN'):'FIREARM':`MELEE · ${w.name.toUpperCase()}`):isItem?slot.item==='health'?'SPACE · HEAL':'SPACE / G · THROW':'COLLECT A WEAPON';b.innerHTML=`<span class="weapon-key"><b>${i+1}</b></span><span class="slot-icon">${w?weaponIcon(id):isItem?inventoryItemIcon(slot):'<span class="empty-icon">＋</span>'}</span><span class="slot-details"><b class="weapon-name">${name}</b><small>${detail}</small></span><span class="weapon-ammo">${w?.kind==='gun'?`<b>${p.ammo[id]??w.magazine}</b><small> / ∞</small>`:isItem?`<b>×${slot.count}</b>`:w?'∞':'—'}</span>`;b.addEventListener('click',()=>equip(i));el.appendChild(b);}$('#reload-status').textContent=p.reloadUntil>performance.now()?'RELOADING…':'R RELOAD · ∞ RESERVE';}
 function log(text,tone=''){const item=document.createElement('div');item.className=`log-entry ${tone}`;item.innerHTML='<i></i><span></span>';item.lastElementChild.textContent=text;const logEl=$('#event-log');logEl.prepend(item);while(logEl.children.length>6)logEl.lastElementChild.remove();}
 function announce(text){const el=$('#notice');el.textContent=text;el.classList.remove('hidden');lastNotice=performance.now();}
@@ -150,7 +198,9 @@ function update(dt,now){const p=state.player;if(!p)return;const cx=Number(canvas
   if(state.mode==='survival'){state.spawnTimer+=dt;if(state.enemies.filter(e=>e.alive&&e.type==='monster').length<(state.settings.difficulty==='survival'?6:4)&&state.spawnTimer>14){spawnEnemy('monster');state.spawnTimer=0;}if(!p.alive)finish(false,'SIGNAL LOST','You were eliminated inside the facility.');}
   else{state.bots=state.bots.filter(b=>b.alive||b.respawn>0);if(!p.alive){p.respawn-=dt;if(p.respawn<=0)respawnPlayer();}$('#blue-score').textContent=String(state.scoreBlue);$('#red-score').textContent=String(state.scoreRed);if(state.scoreBlue>=state.settings.target)finish(state.player.team==='blue','BLUE TEAM WINS',`Final score ${state.scoreBlue} : ${state.scoreRed}`);else if(state.scoreRed>=state.settings.target)finish(state.player.team==='red','RED TEAM WINS',`Final score ${state.scoreBlue} : ${state.scoreRed}`);}
 }
-function blocked(x,y,radius=7){const t=state.world.tile,checks=[[x-radius,y-radius],[x+radius,y-radius],[x-radius,y+radius],[x+radius,y+radius]];return checks.some(([cx,cy])=>!floorTile(Math.floor(cx/t),Math.floor(cy/t)));}
+function blocked(x,y,radius=7){const t=state.world.tile,checks=[[x-radius,y-radius],[x+radius,y-radius],[x-radius,y+radius],[x+radius,y+radius]];return checks.some(([cx,cy])=>{const tx=Math.floor(cx/t),ty=Math.floor(cy/t);return !floorTile(tx,ty)||state.world.doorTiles?.get(`${tx},${ty}`)?.open===false;});}
+function nearbyDoor(actor,radius=54){return state.world?.doors?.filter(door=>!door.open&&dist(actor,{x:door.cx,y:door.cy})<radius).sort((a,b)=>dist(actor,{x:a.cx,y:a.cy})-dist(actor,{x:b.cx,y:b.cy}))[0]||null;}
+function unlockDoor(door,actor=null){if(!door||door.open)return false;door.open=true;state.world.visionAt=-Infinity;if(actor===state.player)announce(`${door.room.name} UNLOCKED`);return true;}
 function bulletTargets(bullet){
   const owner=bullet.owner,p=state.player;
   if(state.mode==='pvp'&&owner?.team)return[p,...state.bots].filter(target=>target&&target!==owner&&target.alive&&target.team!==owner.team);
@@ -294,6 +344,7 @@ function botUseMedkit(bot){
 function updateBot(bot,dt,now){
   if(bot.invuln>0)bot.invuln=Math.max(0,bot.invuln-dt);
   if(bot.hitFlash>0)bot.hitFlash-=dt;
+  if(state.mode==='pvp')unlockDoor(nearbyDoor(bot,37),bot);
   bot.think-=dt;botPickupLoot(bot);botUseMedkit(bot);
   if(bot.think<=0){
     bot.think=rand(.24,.4);
@@ -344,17 +395,64 @@ function respawnPlayer(){const p=state.player,zone=state.world.spawnZones[p.team
 function burst(x,y,color,n){for(let i=0;i<n;i++)state.particles.push({x,y,vx:rand(-95,95),vy:rand(-95,95),life:rand(.12,.42),max:.42,color,r:rand(1,3)});}
 function muzzle(x,y,color){for(let i=0;i<3;i++)state.particles.push({x,y,vx:rand(-30,30),vy:rand(-30,30),life:.07,max:.07,color,r:rand(2,4)});}
 function useGrenade(aimAngle=null){const p=state.player;if(!p?.alive){announce('NO GRENADES');return;}const index=p.inventory.findIndex(slot=>slot?.item==='grenade');if(index<0){announce('NO GRENADES');return;}const stack=p.inventory[index];stack.count--;if(stack.count<=0)p.inventory[index]=null;p.fireAt=performance.now()+360;$('#grenade-count').textContent=String(inventoryGrenades());renderWeapons();const tx=state.mouse.x+state.camera.x,ty=state.mouse.y+state.camera.y,angle=aimAngle??Math.atan2(ty-p.y,tx-p.x);const x=p.x+Math.cos(angle)*GRENADE_THROW_DISTANCE,y=p.y+Math.sin(angle)*GRENADE_THROW_DISTANCE;state.particles.push({x,y,vx:0,vy:0,life:.45,max:.45,color:'#dd8e68',r:9,grenade:true});const runId=state.runId;setTimeout(()=>{if(!state.running||runId!==state.runId)return;burst(x,y,'#e78e62',23);for(const t of state.mode==='pvp'?state.bots:state.enemies)if(t.alive&&dist({x,y},t)<112)hit(t,115*(1-dist({x,y},t)/180),p);sound(80,'sawtooth',.25,.065);},450);sound(110,'triangle',.09,.02);}
-function interact(){const p=state.player;if(!p?.alive)return;if(state.mode==='survival'&&dist(p,state.world.exit)<state.world.exit.r+15){finish(true,'EXTRACTION CONFIRMED','You reached the extraction zone.');return;}const item=state.loot.find(x=>dist(p,x)<39);if(!item){announce('NOTHING IN REACH');return;}if(item.type==='weapon'){const slot=p.inventory.findIndex(value=>value==null);if(slot>=0){p.inventory[slot]=item.weapon;p.ammo[item.weapon]=WEAPONS[item.weapon].magazine;takeLoot(item);p.active=slot;log(`${item.label} added to slot ${slot+1}.`,'good');announce(`${item.label} COLLECTED`);}else{state.pendingLoot=item;$('#inventory-prompt').textContent=`${item.label} FOUND — SELECT A SLOT BELOW TO SWAP`;$('#inventory-prompt').classList.remove('hidden');announce(`${item.label} READY TO EQUIP`);renderWeapons();return;}}else if(item.type==='health'||item.type==='grenade'){const slotType=item.type==='health'?'health':'grenade',existing=p.inventory.findIndex(value=>value?.item===slotType),free=p.inventory.findIndex(value=>value==null);if(existing>=0){p.inventory[existing].count+=(item.count||1);}else if(free>=0){p.inventory[free]={item:slotType,count:item.count||1};p.active=free;}else{state.pendingLoot=item;$('#inventory-prompt').textContent=`${item.label} FOUND — SELECT A SLOT BELOW TO SWAP`;$('#inventory-prompt').classList.remove('hidden');announce(`${item.label} NEEDS AN INVENTORY SLOT`);renderWeapons();return;}takeLoot(item);announce(`${item.label} ADDED TO INVENTORY`);log(`${inventoryItemLabel({item:slotType})} stored in inventory.`,'good');}else if(item.type==='armor'){p.armor=Math.min(100,p.armor+50);log('Armor equipped.','good');}takeLoot(item);state.found++;$('#loot-count').textContent=String(state.found);if(item.type==='armor')announce(`${item.label} COLLECTED`);sound(500,'sine',.08,.018);$('#grenade-count').textContent=String(inventoryGrenades());renderWeapons();}
+function interact(){const p=state.player;if(!p?.alive)return;if(state.mode==='survival'&&dist(p,state.world.exit)<state.world.exit.r+15){finish(true,'EXTRACTION CONFIRMED','You reached the extraction zone.');return;}const door=nearbyDoor(p);if(door){unlockDoor(door,p);return;}const item=state.loot.find(x=>dist(p,x)<39&&visibleAt(x.x,x.y)&&lineClear(p,x));if(!item){announce('NOTHING IN REACH');return;}if(item.type==='weapon'){const slot=p.inventory.findIndex(value=>value==null);if(slot>=0){p.inventory[slot]=item.weapon;p.ammo[item.weapon]=WEAPONS[item.weapon].magazine;takeLoot(item);p.active=slot;log(`${item.label} added to slot ${slot+1}.`,'good');announce(`${item.label} COLLECTED`);}else{state.pendingLoot=item;$('#inventory-prompt').textContent=`${item.label} FOUND — SELECT A SLOT BELOW TO SWAP`;$('#inventory-prompt').classList.remove('hidden');announce(`${item.label} READY TO EQUIP`);renderWeapons();return;}}else if(item.type==='health'||item.type==='grenade'){const slotType=item.type==='health'?'health':'grenade',existing=p.inventory.findIndex(value=>value?.item===slotType),free=p.inventory.findIndex(value=>value==null);if(existing>=0){p.inventory[existing].count+=(item.count||1);}else if(free>=0){p.inventory[free]={item:slotType,count:item.count||1};p.active=free;}else{state.pendingLoot=item;$('#inventory-prompt').textContent=`${item.label} FOUND — SELECT A SLOT BELOW TO SWAP`;$('#inventory-prompt').classList.remove('hidden');announce(`${item.label} NEEDS AN INVENTORY SLOT`);renderWeapons();return;}takeLoot(item);announce(`${item.label} ADDED TO INVENTORY`);log(`${inventoryItemLabel({item:slotType})} stored in inventory.`,'good');}else if(item.type==='armor'){p.armor=Math.min(100,p.armor+50);log('Armor equipped.','good');}takeLoot(item);state.found++;$('#loot-count').textContent=String(state.found);if(item.type==='armor')announce(`${item.label} COLLECTED`);sound(500,'sine',.08,.018);$('#grenade-count').textContent=String(inventoryGrenades());renderWeapons();}
 function finish(won,title,copy){if(state.roundEnd)return;state.roundEnd=true;state.running=false;$('#result-title').innerHTML=title.replace(' ','<br>');$('#result-copy').textContent=copy;$('#result-eyebrow').textContent=won?'OPERATION COMPLETE':'OPERATION FAILED';$('#end-overlay').classList.remove('hidden');}
 function togglePause(){if(!state.running)return;state.paused=!state.paused;$('#pause-overlay').classList.toggle('hidden',!state.paused);game.classList.toggle('paused',state.paused);if(!state.paused)state.lastTime=performance.now();}
-function updateHUD(){const p=state.player;if(!p)return;$('#health-value').textContent=String(Math.ceil(p.hp));$('#health-bar').style.width=`${clamp(p.hp/p.maxHp*100,0,100)}%`;$('#armor-value').textContent=`+ ${Math.ceil(p.armor||0)} ARM`;$('#armor-bar').style.width=`${clamp(p.armor||0,0,100)}%`;$('#grenade-count').textContent=String(inventoryGrenades(p));const minutes=Math.floor(state.elapsed/60),seconds=Math.floor(state.elapsed%60);$('#clock').textContent=`${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}`;const alive=state.mode==='survival'?state.enemies.filter(e=>e.alive&&e.type==='monster').length:state.bots.filter(b=>b.alive&&b.team!==p.team).length;$('#threat-count').textContent=String(alive);const closest=state.mode==='survival'?state.loot.filter(l=>dist(p,l)<100).sort((a,b)=>dist(p,a)-dist(p,b))[0]:null;$('#context-prompt').classList.toggle('hidden',!closest&&!(state.mode==='survival'&&dist(p,state.world.exit)<state.world.exit.r+20));if(closest)$('#context-prompt').textContent=`[ E ] PICK UP ${closest.label}`;else if(state.mode==='survival'&&dist(p,state.world.exit)<state.world.exit.r+20)$('#context-prompt').textContent='[ E ] EXTRACT';if(state.mode==='survival')$('#objective-detail').textContent=dist(p,state.world.exit)<220?'Extraction zone nearby':`${Math.max(0,Math.round(dist(p,state.world.exit)/32))} m to extraction`;}
+function updateHUD(){
+  const p=state.player;if(!p)return;
+  $('#health-value').textContent=String(Math.ceil(p.hp));$('#health-bar').style.width=`${clamp(p.hp/p.maxHp*100,0,100)}%`;
+  $('#armor-value').textContent=`+ ${Math.ceil(p.armor||0)} ARM`;$('#armor-bar').style.width=`${clamp(p.armor||0,0,100)}%`;
+  $('#grenade-count').textContent=String(inventoryGrenades(p));
+  const minutes=Math.floor(state.elapsed/60),seconds=Math.floor(state.elapsed%60);
+  $('#clock').textContent=`${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}`;
+  const alive=state.mode==='survival'?state.enemies.filter(e=>e.alive&&e.type==='monster').length:state.bots.filter(b=>b.alive&&b.team!==p.team).length;
+  $('#threat-count').textContent=String(alive);
+  const door=nearbyDoor(p,58),closest=state.loot.filter(item=>dist(p,item)<45&&visibleAt(item.x,item.y)&&lineClear(p,item)).sort((a,b)=>dist(p,a)-dist(p,b))[0];
+  const extraction=state.mode==='survival'&&dist(p,state.world.exit)<state.world.exit.r+20;
+  const prompt=door?`[ E ] UNLOCK ${door.room.name}`:extraction?'[ E ] EXTRACT':closest?`[ E ] PICK UP ${closest.label}`:'';
+  $('#context-prompt').classList.toggle('hidden',!prompt);if(prompt)$('#context-prompt').textContent=prompt;
+  if(state.mode==='survival')$('#objective-detail').textContent=dist(p,state.world.exit)<220?'Extraction zone nearby':`${Math.max(0,Math.round(dist(p,state.world.exit)/32))} m to extraction`;
+}
 
+function drawRoomProps(){
+  for(const prop of state.roomProps){
+    const x=prop.x-state.camera.x,y=prop.y-state.camera.y;
+    if(x<-32||y<-32||x>Number(canvas.dataset.cssWidth)+32||y>Number(canvas.dataset.cssHeight)+32)continue;
+    ctx.save();ctx.translate(x,y);ctx.lineWidth=1;
+    if(prop.kind==='nest'){ctx.fillStyle='#542c29';ctx.strokeStyle='#a46251';ctx.beginPath();ctx.ellipse(0,0,16,12,0,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.fillStyle='#c47861';for(const [dx,dy] of [[-7,-2],[5,-5],[2,5]]){ctx.beginPath();ctx.arc(dx,dy,3,0,Math.PI*2);ctx.fill();}}
+    else if(prop.kind==='bed'){ctx.fillStyle='#899b87';ctx.fillRect(-15,-10,30,20);ctx.fillStyle='#d6e1d4';ctx.fillRect(-12,-8,10,16);ctx.fillStyle='#71b87b';ctx.fillRect(3,-4,4,9);ctx.fillRect(0,-1,10,3);}
+    else if(prop.kind==='rack'){ctx.fillStyle='#45554a';ctx.fillRect(-15,-12,30,24);ctx.fillStyle='#d4bd81';for(const offset of [-7,0,7]){ctx.fillRect(-11,offset-1,20,2);ctx.fillRect(-4,offset+1,4,3);}}
+    else if(prop.kind==='tank'){ctx.fillStyle='#294744';ctx.strokeStyle='#7dc5a5';ctx.beginPath();ctx.roundRect(-12,-14,24,28,5);ctx.fill();ctx.stroke();ctx.fillStyle='#7bc2a477';ctx.beginPath();ctx.ellipse(0,0,6,9,0,0,Math.PI*2);ctx.fill();}
+    else if(prop.kind==='crate'||prop.kind==='bench'||prop.kind==='shelf'){ctx.fillStyle=prop.kind==='crate'?'#735b3e':prop.kind==='bench'?'#5c6c58':'#67716a';ctx.fillRect(-14,-11,28,22);ctx.strokeStyle='#c3b48b';ctx.strokeRect(-14,-11,28,22);ctx.beginPath();ctx.moveTo(-12,-8);ctx.lineTo(12,8);ctx.moveTo(12,-8);ctx.lineTo(-12,8);ctx.stroke();}
+    else if(prop.kind==='generator'){ctx.fillStyle='#665d3b';ctx.beginPath();ctx.arc(0,0,14,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#d3bf6d';ctx.beginPath();ctx.arc(0,0,8,0,Math.PI*2);ctx.stroke();ctx.fillStyle='#e0ca71';ctx.fillRect(-2,-10,4,7);}
+    else{ctx.fillStyle='#344943';ctx.fillRect(-15,-11,30,22);ctx.fillStyle=prop.kind==='server'?'#78bea3':'#80b7c9';ctx.fillRect(-11,-7,22,11);ctx.fillStyle='#b7e3c1';ctx.fillRect(-10,7,4,2);ctx.fillRect(-3,7,4,2);}
+    ctx.restore();
+  }
+}
+function drawDoors(){
+  for(const door of state.world.doors){
+    if(!visibleAt(door.approach.x,door.approach.y)&&!visibleAt(door.cx,door.cy))continue;
+    const x=door.x*32-state.camera.x,y=door.y*32-state.camera.y;
+    ctx.save();ctx.fillStyle=door.open?'#91bd8d55':'#302e22';ctx.strokeStyle=door.open?'#a4d59a':'#d9bd72';ctx.lineWidth=2;
+    ctx.fillRect(x+2,y+8,60,16);ctx.strokeRect(x+2,y+8,60,16);
+    if(!door.open){ctx.fillStyle='#e6cf83';ctx.font='bold 8px "IBM Plex Mono"';ctx.textAlign='center';ctx.fillText('LOCKED',x+32,y+19);}
+    ctx.restore();
+  }
+}
+function drawVisionFog(sx,sy,ex,ey){
+  const t=state.world.tile;for(let y=sy;y<ey;y++)for(let x=sx;x<ex;x++){
+    if(state.world.visible.has(`${x},${y}`))continue;
+    ctx.fillStyle=floorTile(x,y)?'#090e0bf2':'#0d140edb';ctx.fillRect(x*t-state.camera.x,y*t-state.camera.y,t+.5,t+.5);
+  }
+}
 function render(now){const W=Number(canvas.dataset.cssWidth)||600,H=Number(canvas.dataset.cssHeight)||400;ctx.clearRect(0,0,W,H);ctx.fillStyle=COLORS.floor;ctx.fillRect(0,0,W,H);const t=state.world.tile,sx=Math.floor(state.camera.x/t),sy=Math.floor(state.camera.y/t),ex=Math.ceil((state.camera.x+W)/t)+1,ey=Math.ceil((state.camera.y+H)/t)+1;for(let y=sy;y<ey;y++)for(let x=sx;x<ex;x++){const px=x*t-state.camera.x,py=y*t-state.camera.y;if(!floorTile(x,y)){ctx.fillStyle='#364137';ctx.fillRect(px,py,t,t);ctx.fillStyle='#465248';ctx.fillRect(px,py,t,3);ctx.fillStyle='#303a31';ctx.fillRect(px,py+t-3,t,3);ctx.fillStyle='#63715e2e';ctx.fillRect(px+3,py+4,t-6,t-8);ctx.strokeStyle='#232c25';ctx.strokeRect(px+.5,py+.5,t-1,t-1);}else{const parity=(x*17+y*23)%7;ctx.fillStyle=parity===0?'#222d24':parity===1?'#1e2820':'#202a22';ctx.fillRect(px,py,t,t);ctx.strokeStyle=COLORS.grid;ctx.strokeRect(px+.5,py+.5,t,t);}}
   for(const d of state.decor){if(d.x<state.camera.x-15||d.x>state.camera.x+W+15||d.y<state.camera.y-15||d.y>state.camera.y+H+15)continue;ctx.globalAlpha=d.alpha;ctx.fillStyle=d.kind==='stain'?'#a58e7155':'#aab6a7';ctx.beginPath();ctx.ellipse(d.x-state.camera.x,d.y-state.camera.y,d.r*1.8,d.r,rand(0,3),0,Math.PI*2);ctx.fill();}ctx.globalAlpha=1;if(state.world.labels){ctx.save();ctx.font='7px "IBM Plex Mono"';ctx.fillStyle='#b0bfa263';ctx.textAlign='center';for(const label of state.world.labels)ctx.fillText(label.text,label.x-state.camera.x,label.y-state.camera.y);ctx.restore();}
+  drawRoomProps();
   if(state.mode==='survival'){const e=state.world.exit;ctx.save();ctx.globalAlpha=.44+.16*Math.sin(now/350);ctx.strokeStyle=COLORS.lime;ctx.lineWidth=2;ctx.beginPath();ctx.arc(e.x-state.camera.x,e.y-state.camera.y,e.r,0,Math.PI*2);ctx.stroke();ctx.fillStyle='#c0ef7513';ctx.fill();ctx.restore();const exx=e.x-state.camera.x,exy=e.y-state.camera.y;ctx.fillStyle='#c0ef75';ctx.font='8px "IBM Plex Mono"';ctx.textAlign='center';ctx.fillText('EXTRACTION',exx,exy-39);}
   for(const item of state.loot)drawLoot(item);
   for(const b of state.bullets){const x=b.x-state.camera.x,y=b.y-state.camera.y;ctx.save();ctx.translate(x,y);ctx.rotate(Math.atan2(b.vy,b.vx));ctx.shadowColor=b.color;ctx.shadowBlur=9;ctx.strokeStyle=b.color;ctx.lineWidth=b.acid?3:2;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(-15,0);ctx.lineTo(-3,0);ctx.stroke();ctx.fillStyle=b.acid?'#b5f28a':'#fff5d8';ctx.beginPath();ctx.ellipse(0,0,b.acid?3.3:3,b.acid?2.3:1.6,0,0,Math.PI*2);ctx.fill();ctx.restore();}
   for(const e of state.enemies)if(e.alive)drawEntity(e,e.type==='monster'?'#cf6350':e.team===state.player.team?COLORS.blue:'#bb7459',now,e.type==='guard'?(e.team===state.player.team?'ALLY GUARD':'GUARD'):e.variant?.toUpperCase()||'');for(const b of state.bots)if(b.alive)drawEntity(b,b.team==='blue'?COLORS.blue:COLORS.red,now,b.team===state.player.team?'ALLY':'HOSTILE');if(state.player?.alive)drawEntity(state.player,COLORS.lime,now,'YOU');for(const part of state.particles){const x=part.x-state.camera.x,y=part.y-state.camera.y;ctx.globalAlpha=clamp(part.life/part.max,0,1);ctx.fillStyle=part.color;if(part.grenade){ctx.beginPath();ctx.arc(x,y,part.r,0,Math.PI*2);ctx.fill();}else{ctx.beginPath();ctx.arc(x,y,part.r,0,Math.PI*2);ctx.fill();}}ctx.globalAlpha=1;
+  drawVisionFog(sx,sy,ex,ey);drawDoors();
   if(state.mode==='survival'&&!state.visibleMap){const px=state.player.x-state.camera.x,py=state.player.y-state.camera.y;const gradient=ctx.createRadialGradient(px,py,80,px,py,330);gradient.addColorStop(0,'#0000');gradient.addColorStop(.65,'#0002');gradient.addColorStop(1,'#060907c9');ctx.fillStyle=gradient;ctx.fillRect(0,0,W,H);}
   if(state.visibleMap)drawFullMap(W,H);}
 function drawHeldWeapon(id){const w=WEAPONS[id]||WEAPONS[0];ctx.save();ctx.lineCap='round';ctx.lineJoin='round';if(w.kind==='gun'){ctx.fillStyle='#131a16';ctx.strokeStyle='#c8d0c3';ctx.lineWidth=.8;ctx.beginPath();ctx.roundRect(2,-3.7,20,7.4,1);ctx.fill();ctx.stroke();ctx.fillStyle=w.color;if(w.family===0){ctx.fillRect(6,-4,12,2);ctx.fillRect(21,-1.7,7,3.4);ctx.fillStyle='#343c35';ctx.beginPath();ctx.moveTo(11,3);ctx.lineTo(17,3);ctx.lineTo(19,9);ctx.lineTo(14,9);ctx.closePath();ctx.fill();}
@@ -390,6 +488,7 @@ function visibleAt(x,y){return state.world.visible.has(`${Math.floor(x/32)},${Ma
 function drawMinimap(){
   const W=minimap.width,H=minimap.height,w=state.world.w,h=state.world.h,tw=W/w,th=H/h; mctx.clearRect(0,0,W,H);mctx.fillStyle='#101612';mctx.fillRect(0,0,W,H);
   for(let y=0;y<h;y++)for(let x=0;x<w;x++){const key=`${x},${y}`,px=x*tw,py=y*th;if(!floorTile(x,y)){mctx.fillStyle='#465346';mctx.fillRect(px,py,tw+.4,th+.4);}else if(state.world.explored.has(key)){mctx.fillStyle=state.world.visible.has(key)?'#526b4d':'#202a22';mctx.fillRect(px,py,tw+.4,th+.4);}}
+  for(const door of state.world.doors)if(visibleAt(door.approach.x,door.approach.y)||state.world.explored.has(`${Math.floor(door.approach.x/32)},${Math.floor(door.approach.y/32)}`)){mctx.fillStyle=door.open?'#91bd8d':'#e2bf6d';mctx.fillRect(door.x*tw,door.y*th,Math.max(2,tw*2),Math.max(2,th));}
   const p=state.player;if(state.mode==='survival'&&state.world.explored.has(`${Math.floor(state.world.exit.x/32)},${Math.floor(state.world.exit.y/32)}`)){mctx.fillStyle=COLORS.lime;mctx.beginPath();mctx.arc(state.world.exit.x/32*tw,state.world.exit.y/32*th,3,0,Math.PI*2);mctx.fill();}
   const units=state.mode==='pvp'?state.bots:state.enemies;for(const unit of units)if(unit.alive&&visibleAt(unit.x,unit.y)){mctx.fillStyle=unit.team===p.team?COLORS.lime:COLORS.red;mctx.fillRect(unit.x/32*tw-1.5,unit.y/32*th-1.5,3,3);}
   mctx.fillStyle=COLORS.lime;mctx.beginPath();mctx.arc(p.x/32*tw,p.y/32*th,3,0,Math.PI*2);mctx.fill();mctx.strokeStyle='#bbc7ae77';mctx.lineWidth=1;mctx.strokeRect(state.camera.x/(w*32)*W,state.camera.y/(h*32)*H,(Number(canvas.dataset.cssWidth)||600)/(w*32)*W,(Number(canvas.dataset.cssHeight)||400)/(h*32)*H);
@@ -397,6 +496,7 @@ function drawMinimap(){
 function drawFullMap(W,H){
   ctx.save();ctx.fillStyle='#090d0bf7';ctx.fillRect(0,0,W,H);const pad=24,scale=Math.min((W-pad*2)/(state.world.w*32),(H-pad*2)/(state.world.h*32)),mw=state.world.w*32*scale,mh=state.world.h*32*scale,ox=(W-mw)/2,oy=(H-mh)/2;
   for(let y=0;y<state.world.h;y++)for(let x=0;x<state.world.w;x++){const key=`${x},${y}`,px=ox+x*32*scale,py=oy+y*32*scale;if(!floorTile(x,y)){ctx.fillStyle='#465346';ctx.fillRect(px,py,32*scale+.5,32*scale+.5);}else if(state.world.explored.has(key)){ctx.fillStyle=state.world.visible.has(key)?'#526b4d':'#202a22';ctx.fillRect(px,py,32*scale+.5,32*scale+.5);}}
+  for(const door of state.world.doors)if(visibleAt(door.approach.x,door.approach.y)||state.world.explored.has(`${Math.floor(door.approach.x/32)},${Math.floor(door.approach.y/32)}`)){ctx.fillStyle=door.open?'#91bd8d':'#e2bf6d';ctx.fillRect(ox+door.x*32*scale,oy+door.y*32*scale,Math.max(2,64*scale),Math.max(2,32*scale));}
   ctx.save();ctx.font=`${Math.max(5,Math.min(8,scale*48))}px "IBM Plex Mono"`;ctx.textAlign='center';ctx.fillStyle='#d5dec588';for(const label of state.world.labels||[])if(state.world.explored.has(`${Math.floor(label.x/32)},${Math.floor(label.y/32)}`))ctx.fillText(label.text,ox+label.x*scale,oy+label.y*scale);ctx.restore();
   if(state.mode==='survival'&&state.world.explored.has(`${Math.floor(state.world.exit.x/32)},${Math.floor(state.world.exit.y/32)}`)){ctx.fillStyle=COLORS.lime;ctx.beginPath();ctx.arc(ox+state.world.exit.x*scale,oy+state.world.exit.y*scale,4,0,Math.PI*2);ctx.fill();}
   const units=state.mode==='pvp'?state.bots:state.enemies;for(const unit of units)if(unit.alive&&visibleAt(unit.x,unit.y)){ctx.fillStyle=unit.team===state.player.team?COLORS.lime:COLORS.red;ctx.beginPath();ctx.arc(ox+unit.x*scale,oy+unit.y*scale,3,0,Math.PI*2);ctx.fill();}

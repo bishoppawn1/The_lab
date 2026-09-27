@@ -33,6 +33,7 @@ const LOOT_TABLE = [
   {type:'health',label:'MEDKIT',color:'#90d485',weight:13},{type:'armor',label:'ARMOR',color:'#78b5de',weight:10},{type:'grenade',label:'GRENADE',color:'#dd8e68',weight:8},
 ];
 const SUPPLY_LOOT = LOOT_TABLE.filter(item=>item.type!=='weapon');
+const BOT_STARTERS=[null,null,null,null,1,1,2,2,3,3,4,5,6,11,12,13,15,16,7,8,9,10,14];
 const PLAYER_SIGHT_RANGE = 320;
 const BOT_SIGHT_RANGE = 420;
 const LOOT_RESPAWN_SECONDS = 12;
@@ -84,7 +85,7 @@ function generateWorld(mode){
     state.roomProps.push({x,y,kind});break;
   }}
 }
-function findOpen(nearX=31,nearY=24,minDistance=0,maxDistance=Infinity,accept=()=>true){for(let i=0;i<900;i++){const tx=Math.floor(rand(1,state.world.w-1)),ty=Math.floor(rand(1,state.world.h-1)),p={x:(tx+.5)*32,y:(ty+.5)*32},d=Math.hypot(tx-nearX,ty-nearY);if(floorTile(tx,ty)&&accept(tx,ty)&&d>=minDistance&&d<=maxDistance&&!blocked(p.x,p.y,9)&&!occupied(p,18))return p;}let fallback=null,best=Infinity;for(let y=1;y<state.world.h-1;y++)for(let x=1;x<state.world.w-1;x++){const p={x:(x+.5)*32,y:(y+.5)*32},d=(x+.5-nearX)**2+(y+.5-nearY)**2;if(d<best&&accept(x,y)&&floorTile(x,y)&&!blocked(p.x,p.y,9)&&!occupied(p,18)){fallback=p;best=d;}}return fallback||{x:(nearX+.5)*32,y:(nearY+.5)*32};}
+function findOpen(nearX=31,nearY=24,minDistance=0,maxDistance=Infinity,accept=()=>true){for(let i=0;i<900;i++){const tx=Math.floor(rand(1,state.world.w-1)),ty=Math.floor(rand(1,state.world.h-1)),p={x:(tx+.5)*32,y:(ty+.5)*32},d=Math.hypot(tx-nearX,ty-nearY);if(floorTile(tx,ty)&&accept(tx,ty)&&d>=minDistance&&d<=maxDistance&&!blocked(p.x,p.y,9)&&!occupied(p,18))return p;}let fallback=null,best=Infinity;for(let y=1;y<state.world.h-1;y++)for(let x=1;x<state.world.w-1;x++){const p={x:(x+.5)*32,y:(y+.5)*32},d=(x+.5-nearX)**2+(y+.5-nearY)**2;if(d<best&&d>=minDistance**2&&d<=maxDistance**2&&accept(x,y)&&floorTile(x,y)&&!blocked(p.x,p.y,9)&&!occupied(p,18)){fallback=p;best=d;}}return fallback||{x:(nearX+.5)*32,y:(nearY+.5)*32};}
 function occupied(p,r){return state.enemies.some(e=>e.alive&&dist(p,e)<r+e.r)||state.bots.some(b=>b.alive&&dist(p,b)<r+b.r)||state.player&&state.player.alive&&dist(p,state.player)<r+state.player.r;}
 function inventoryItemLabel(item){return item?.item==='health'?'MEDKIT':item?.item==='grenade'?'GRENADE':'ITEM';}
 function inventoryItemIcon(item){return item?.item==='health'?'<span class="inventory-item-icon medkit" aria-hidden="true">✚</span>':'<span class="inventory-item-icon grenade" aria-hidden="true">◉</span>';}
@@ -105,7 +106,7 @@ function dropPlayerLoadout(){const p=state.player;let retainedPistol=false;for(l
 function dropBotLoadout(bot){
   for(let i=0;i<bot.inventory.length;i++)if(bot.pickedSlots?.[i]&&bot.inventory[i]!=null)state.loot.push(dropInventorySlot(bot.inventory[i],bot,i*2));
   if(bot.pickedArmor&&bot.armor>0)state.loot.push(dropInventorySlot({item:'armor'},bot,9));
-  bot.inventory=[0,1,null,null];bot.pickedSlots=[false,false,false,false];bot.pickedArmor=false;bot.active=0;
+  bot.inventory=[0,null,null,null];bot.pickedSlots=[false,false,false,false];bot.pickedArmor=false;bot.active=0;
 }
 function equip(index){const p=state.player;if(index<0||index>3||!p)return;if(state.pendingLoot){const item=state.pendingLoot;if(!state.loot.includes(item)){state.pendingLoot=null;$('#inventory-prompt').classList.add('hidden');announce('PICKUP NO LONGER AVAILABLE');renderWeapons();return;}const old=p.inventory[index],replacement=item.type==='weapon'?item.weapon:{item:item.type==='health'?'health':item.type,count:item.count||1};if(old!=null)state.loot.push(dropInventorySlot(old));p.inventory[index]=replacement;if(typeof replacement==='number')p.ammo[replacement]=WEAPONS[replacement].magazine;takeLoot(item);state.pendingLoot=null;$('#inventory-prompt').classList.add('hidden');state.found++;$('#loot-count').textContent=String(state.found);const label=item.type==='weapon'?WEAPONS[item.weapon].name:inventoryItemLabel(replacement);log(`${label} assigned to slot ${index+1}.`,'good');announce(`${label.toUpperCase()} COLLECTED`);p.active=index;renderWeapons();$('#grenade-count').textContent=String(inventoryGrenades());return;}if(p.inventory[index]==null)return;p.active=index;renderWeapons();}
 
@@ -120,11 +121,11 @@ const weaponShapes=[
 ];
 function weaponIcon(id){const weapon=WEAPONS[id],detail={11:'<path d="M14 21h4v4h-4z"/>',12:'<circle cx="17" cy="20" r="5"/>',13:'<path d="M18 17h5v7h-5z"/>',14:'<path d="M29 8h7v3h-7z"/>',15:'<path d="M29 10h7v3h-7z"/>',16:'<path d="m27 8 5-5 3 2-5 6z"/>'}[id]||'';return `<svg viewBox="0 0 36 26" aria-hidden="true" class="weapon-svg ${weapon.kind}"><g fill="${weapon.color}" stroke="#172019" stroke-width=".7" stroke-linejoin="round">${weaponShapes[weapon.family]}${detail}</g></svg>`;}
 function buildPlayer(){const p={x:8.5*32,y:23.5*32,r:11,speed:176,hp:100,maxHp:100,armor:0,inventory:[0,{item:'grenade',count:1},null,null],active:0,ammo:Object.fromEntries(WEAPONS.map((w,i)=>[i,w.magazine||0])),team:state.settings.team||'blue',alive:true,angle:0,stun:0,invuln:0,hitFlash:0,fireTime:0,reloadUntil:0,respawn:0,ai:false,kills:0};if(state.settings.loadout==='assault'){p.inventory=[3,1,0,{item:'grenade',count:1}];p.active=0;}if(state.settings.loadout==='medic'){p.hp=125;p.maxHp=125;p.inventory=[0,4,{item:'health',count:2},{item:'grenade',count:1}];}if(state.mode==='pvp'){p.armor=35;p.inventory=[0,null,null,null];p.active=0;}return p;}
-function roomSpot(room,avoidLoot=false){
+function roomSpot(room,avoidLoot=false,previous=null){
   for(let attempt=0;attempt<100;attempt++){
     const tx=Math.floor(rand(room.x+2,room.x+room.w-2)),ty=Math.floor(rand(room.y+2,room.y+room.h-2));
     const spot={x:(tx+.5)*32,y:(ty+.5)*32};
-    if(!blocked(spot.x,spot.y,10)&&!occupied(spot,17)&&(!avoidLoot||!state.loot.some(item=>dist(item,spot)<34)))return spot;
+    if(!blocked(spot.x,spot.y,10)&&!occupied(spot,17)&&(!previous||dist(previous,spot)>=48)&&(!avoidLoot||!state.loot.some(item=>dist(item,spot)<34)))return spot;
   }
   return{x:(room.x+Math.floor(room.w/2)+.5)*32,y:(room.y+Math.floor(room.h/2)+.5)*32};
 }
@@ -134,7 +135,7 @@ function addRoomLoot(room,type,weapon=null){
 }
 function seedRoomLoot(){
   for(const room of state.world.rooms){
-    if(room.name==='ARMORY')for(const weapon of [1,2,3,choice([8,13,15])])addRoomLoot(room,'weapon',weapon);
+    if(room.name==='ARMORY')for(const family of [0,1,2,3])addRoomLoot(room,'weapon',weightedLoot(LOOT_TABLE.filter(item=>item.type==='weapon'&&WEAPONS[item.weapon].family===family)).weapon);
     else if(room.name==='MEDICAL'){for(let i=0;i<3;i++)addRoomLoot(room,'health');addRoomLoot(room,'armor');}
     else if(room.name==='STORAGE'){addRoomLoot(room,'grenade');addRoomLoot(room,'armor');}
     else if(room.name==='WORKSHOP')addRoomLoot(room,'weapon',16);
@@ -143,8 +144,12 @@ function seedRoomLoot(){
   }
 }
 function spawnLoot(count){
-  const start=state.world.spawnZones[0],near=(dx,dy)=>({x:start.x+dx*32,y:start.y+dy*32});
-  state.loot=state.mode==='survival'?[{...near(2,-1),type:'health',label:'MEDKIT',color:'#90d485',r:10,bob:0,id:'medkit'},{...near(-2,1),type:'armor',label:'ARMOR',color:'#78b5de',r:10,bob:0,id:'armor'},{...near(3,2),type:'grenade',label:'GRENADE',color:'#dd8e68',r:10,bob:0,id:'grenade'}]:[];
+  const start=state.world.spawnZones[0];
+  state.loot=[];
+  if(state.mode==='survival')for(let i=0;i<3;i++){
+    const spot=findOpen(start.x/32,start.y/32,2,8,(x,y)=>!state.loot.some(item=>Math.hypot(item.x/32-x,item.y/32-y)<2));
+    state.loot.push({...spot,...weightedLoot(SUPPLY_LOOT),r:10,bob:rand(0,Math.PI*2),id:`entry-${i}`});
+  }
   if(state.mode==='pvp')for(let team=0;team<2&&state.loot.length<count;team++){
     const zone=state.world.spawnZones[team],spot=findOpen(zone.x/32,zone.y/32,4,7),weapon=choice([4,5,6]),spec=WEAPONS[weapon];
     state.loot.push({...spot,type:'weapon',weapon,label:spec.name.toUpperCase(),color:spec.color,r:10,bob:rand(0,Math.PI*2),id:team});
@@ -156,12 +161,27 @@ function spawnLoot(count){
   state.loot.forEach((item,index)=>item.spawnId=index);
 }
 function takeLoot(item){if(!state.loot.includes(item))return false;state.loot=state.loot.filter(loot=>loot!==item);if(item.spawnId!=null)state.lootRespawns.push({item:{...item,bob:0},at:state.elapsed+LOOT_RESPAWN_SECONDS});return true;}
-function respawnLoot(){for(let i=state.lootRespawns.length-1;i>=0;i--){const entry=state.lootRespawns[i];if(state.elapsed<entry.at)continue;if(occupied(entry.item,12)){entry.at=state.elapsed+2;continue;}state.loot.push({...entry.item,bob:rand(0,Math.PI*2)});state.lootRespawns.splice(i,1);}}
+function respawnPool(item){
+  if(item.room==='ARMORY')return LOOT_TABLE.filter(spec=>spec.type==='weapon'&&WEAPONS[spec.weapon].kind==='gun');
+  if(item.room==='WORKSHOP')return LOOT_TABLE.filter(spec=>spec.type==='weapon'&&WEAPONS[spec.weapon].kind==='melee');
+  if(item.room==='MEDICAL')return LOOT_TABLE.filter(spec=>spec.type==='health'||spec.type==='armor');
+  if(['STORAGE','POWER STATION','RESEARCH LAB'].includes(item.room))return SUPPLY_LOOT;
+  return LOOT_TABLE;
+}
+function respawnLoot(){for(let i=state.lootRespawns.length-1;i>=0;i--){
+  const entry=state.lootRespawns[i];if(state.elapsed<entry.at)continue;
+  const old=entry.item,pool=respawnPool(old).filter(spec=>spec.type!==old.type||spec.weapon!==old.weapon);
+  const spec=weightedLoot(pool),room=old.room&&state.world.rooms.find(candidate=>candidate.name===old.room);
+  const spot=room?roomSpot(room,true,old):findOpen(old.x/32,old.y/32,5,Infinity,(x,y)=>!state.loot.some(item=>Math.hypot(item.x/32-x,item.y/32-y)<2));
+  const next={...old,...spot,...spec,bob:rand(0,Math.PI*2)};delete next.count;if(spec.count!=null)next.count=spec.count;
+  state.loot.push(next);state.lootRespawns.splice(i,1);
+}}
 function startGame(){clearOperationUi();state.runId++;setup.classList.add('hidden');menu.classList.add('hidden');game.classList.remove('hidden');state.elapsed=0;state.kills=0;state.found=0;state.feed=[];state.visibleMap=false;state.bullets=[];state.lootRespawns=[];state.particles=[];state.round=1;state.roundEnd=false;state.scoreBlue=0;state.scoreRed=0;state.player=null;generateWorld(state.mode);state.player=buildPlayer();state.bots=[];state.enemies=[];state.spawnTimer=0;
   if(state.mode==='survival'){state.player.x=state.world.spawnZones[0].x;state.player.y=state.world.spawnZones[0].y;state.player.invuln=2.5;if(state.settings.difficulty==='training'){state.player.hp=state.player.maxHp=150;state.player.armor=20;}else if(state.settings.difficulty==='survival'){state.player.hp=state.player.maxHp=80;}spawnLoot(46);spawnEnemy('guard',state.world.rooms[0]);const threatTotal=state.settings.difficulty==='training'?2:state.settings.difficulty==='survival'?5:3;for(let i=0;i<threatTotal;i++)spawnEnemy('monster');seedRoomThreats();$('#mode-label').textContent='LAB ESCAPE';$('#objective-label').textContent='REACH EXTRACTION';$('#objective-detail').textContent='Explore the lab';$('#objective-detail').classList.remove('blue-text');$('#score-panel').classList.add('hidden');$('#map-status').textContent='— EXPLORE';log('You entered Facility 07-C. Find a way out.','good');log('Supplies are marked by their silhouettes. Press E to collect.','good');}
   else {spawnLoot(40);const playerColor=state.settings.team==='blue'?'blue':'red',enemyColor=playerColor==='blue'?'red':'blue';state.player.team=playerColor;state.player.x=state.world.spawnZones[playerColor==='blue'?0:1].x;state.player.y=state.world.spawnZones[playerColor==='blue'?0:1].y;for(let i=0;i<state.teamSize-1;i++)spawnBot(playerColor,i);for(let i=0;i<state.teamSize;i++)spawnBot(enemyColor,i);$('#mode-label').textContent=`TEAM DEATHMATCH · ${state.teamSize}V${state.teamSize}`;$('#objective-label').textContent=`FIRST TEAM TO ${state.settings.target} WINS`;$('#objective-detail').textContent=`Win ${state.settings.target} eliminations`;$('#score-target').textContent=`FIRST TO ${state.settings.target}`;$('#score-panel').classList.remove('hidden');$('#teams-line').textContent=`${state.teamSize}V${state.teamSize} · BOTS ACTIVE`;$('#map-status').textContent='— TEAM VISION';log(`${state.teamSize}v${state.teamSize} match active. AI squads deployed.`,'good');log('Collect gear, then fight for your team.');}
   $('#threat-count').textContent=state.mode==='survival'?String(state.enemies.filter(e=>e.alive&&e.type==='monster').length):String(state.bots.length+1);$('#kill-count').textContent='0';$('#loot-count').textContent='0';$('#grenade-count').textContent=String(inventoryGrenades());$('#blue-score').textContent='0';$('#red-score').textContent='0';$('#health-value').textContent=String(state.player.hp);$('#health-bar').style.width='100%';$('#armor-value').textContent=`+ ${state.player.armor} ARM`;$('#armor-bar').style.width=`${state.player.armor}%`;renderWeapons();$('#event-log').innerHTML='';updateHUD();state.running=true;state.paused=false;state.lastTime=performance.now();resizeCanvas();const runId=state.runId;requestAnimationFrame(now=>frame(now,runId));}
-function spawnBot(team,i){const zone=state.world.spawnZones[team==='blue'?0:1],pos=findOpen(zone.x/32,zone.y/32,0,7);const b={...pos,team,ai:true,alive:true,r:10,hp:100,maxHp:100,speed:rand(85,115),inventory:[0,1,null,null],pickedSlots:[false,false,false,false],pickedArmor:false,active:Math.random()<.5?0:1,ammo:{1:30},angle:0,fireTime:rand(0,500),stun:0,invuln:0,respawn:0,id:`${team}${i}`,kills:0,target:null,think:rand(0,1)};state.bots.push(b);}
+function botStarterKit(){const second=choice(BOT_STARTERS),inventory=[0,second,null,null],ammo={0:WEAPONS[0].magazine};if(second!=null&&WEAPONS[second].kind==='gun')ammo[second]=WEAPONS[second].magazine;return{inventory,ammo,active:second==null?0:Math.floor(Math.random()*2)};}
+function spawnBot(team,i){const zone=state.world.spawnZones[team==='blue'?0:1],pos=findOpen(zone.x/32,zone.y/32,0,7);const b={...pos,team,ai:true,alive:true,r:10,hp:100,maxHp:100,speed:rand(85,115),...botStarterKit(),pickedSlots:[false,false,false,false],pickedArmor:false,angle:0,fireTime:rand(0,500),stun:0,invuln:0,respawn:0,id:`${team}${i}`,kills:0,target:null,think:rand(0,1)};state.bots.push(b);}
 function spawnEnemy(type='monster',room=null,chosenVariant=null){
   const origin=state.player||{x:40*32,y:32*32};
   const corridor=(x,y)=>!state.world.rooms.some(candidate=>x>=candidate.x&&x<candidate.x+candidate.w&&y>=candidate.y&&y<candidate.y+candidate.h);
@@ -390,7 +410,7 @@ function steerToward(actor,target,pathPoint,speed,dt){
   if(d>5)move(actor,dx/d*speed*dt,dy/d*speed*dt);
   if(!clear&&Math.hypot(actor.x-beforeX,actor.y-beforeY)<.15){actor.stuckTime=(actor.stuckTime||0)+dt;if(actor.stuckTime>.35){const side=actor.stuckSide||1,nx=-dy/(d||1)*speed*dt*1.8*side,ny=dx/(d||1)*speed*dt*1.8*side;move(actor,nx,ny);if(Math.hypot(actor.x-beforeX,actor.y-beforeY)<.15){move(actor,-nx,-ny);actor.stuckSide=-side;}actor.stuckTime=0;actor.think=0;}}else actor.stuckTime=0;
 }
-function respawnBot(b){const zone=state.world.spawnZones[b.team==='blue'?0:1],p=findOpen(zone.x/32,zone.y/32,0,5);b.x=p.x;b.y=p.y;b.hp=100;b.armor=25;b.alive=true;b.invuln=.55;b.respawn=0;b.inventory=[0,1,null,null];b.pickedSlots=[false,false,false,false];b.pickedArmor=false;b.active=0;b.target=null;b.recentAttacker=null;b.pathPoint=null;b.lootJudgments=new WeakMap();b.think=0;b.ammo[1]=30;b.fireTime=performance.now()+500;}
+function respawnBot(b){const zone=state.world.spawnZones[b.team==='blue'?0:1],p=findOpen(zone.x/32,zone.y/32,0,5),kit=botStarterKit();b.x=p.x;b.y=p.y;b.hp=100;b.armor=25;b.alive=true;b.invuln=.55;b.respawn=0;b.inventory=kit.inventory;b.ammo=kit.ammo;b.pickedSlots=[false,false,false,false];b.pickedArmor=false;b.active=kit.active;b.target=null;b.recentAttacker=null;b.pathPoint=null;b.lootJudgments=new WeakMap();b.think=0;b.fireTime=performance.now()+500;}
 function respawnPlayer(){const p=state.player,zone=state.world.spawnZones[p.team==='blue'?0:1],pos=findOpen(zone.x/32,zone.y/32,0,5);p.x=pos.x;p.y=pos.y;p.hp=100;p.armor=25;p.alive=true;p.invuln=.65;p.respawn=0;announce('OPERATOR BACK IN THE FIGHT');renderWeapons();}
 function burst(x,y,color,n){for(let i=0;i<n;i++)state.particles.push({x,y,vx:rand(-95,95),vy:rand(-95,95),life:rand(.12,.42),max:.42,color,r:rand(1,3)});}
 function muzzle(x,y,color){for(let i=0;i<3;i++)state.particles.push({x,y,vx:rand(-30,30),vy:rand(-30,30),life:.07,max:.07,color,r:rand(2,4)});}

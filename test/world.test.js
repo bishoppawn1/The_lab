@@ -10,7 +10,7 @@ function loadGameLogic(random) {
   const element = { getContext: () => ({}), classList: { add() {}, remove() {} } };
   const context = { document: { querySelector: () => element }, performance: { now: () => 1000 } };
   if (random) context.Math = Object.assign(Object.create(Math), { random });
-  vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, WEAPONS, generateWorld, spawnLoot, takeLoot, respawnLoot, blocked, lineClear, interact, unlockDoor, updateVision, seedRoomThreats, spawnEnemy, firingLaneClear, updateBot, updateEnemy, botCanTakeLoot, botPickupLoot, hit, shoot, advanceBullet };`, context);
+  vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, WEAPONS, generateWorld, spawnLoot, takeLoot, respawnLoot, spawnBot, respawnBot, blocked, lineClear, interact, unlockDoor, updateVision, seedRoomThreats, spawnEnemy, firingLaneClear, updateBot, updateEnemy, botCanTakeLoot, botPickupLoot, hit, shoot, advanceBullet };`, context);
   return context.lab;
 }
 
@@ -74,7 +74,7 @@ test('generated rooms remain connected across different layouts', () => {
   assert.ok(layouts.size > 1, 'new operations should produce different room layouts');
 });
 
-test('collected world loot returns to its original location', () => {
+test('collected world loot respawns as a different item in a new location', () => {
   const { state, generateWorld, spawnLoot, takeLoot, respawnLoot } = loadGameLogic();
   generateWorld('pvp');
   state.player = { alive: false, x: 0, y: 0, r: 11 };
@@ -91,11 +91,66 @@ test('collected world loot returns to its original location', () => {
   respawnLoot();
   const returned = state.loot.find(item => item.spawnId === pickup.spawnId);
   assert.ok(returned);
-  assert.equal(returned.x, pickup.x);
-  assert.equal(returned.y, pickup.y);
-  assert.equal(returned.type, pickup.type);
+  assert.ok(Math.hypot(returned.x - pickup.x, returned.y - pickup.y) >= 5 * 32);
+  assert.notEqual(`${returned.type}:${returned.weapon}`, `${pickup.type}:${pickup.weapon}`);
+  assert.equal(state.world.map[Math.floor(returned.y / 32)][Math.floor(returned.x / 32)], 0);
   respawnLoot();
   assert.equal(state.loot.filter(item => item.spawnId === pickup.spawnId).length, 1);
+});
+
+test('themed room pickups reroll within their room', () => {
+  const { state, generateWorld, spawnLoot, takeLoot, respawnLoot, WEAPONS } = loadGameLogic();
+  state.mode = 'pvp';
+  generateWorld('pvp');
+  state.player = { alive: false, x: 0, y: 0, r: 11 };
+  state.bots = [];
+  state.enemies = [];
+  spawnLoot(40);
+  for (const roomName of ['ARMORY', 'MEDICAL']) {
+    const before = state.loot.find(item => item.room === roomName);
+    const room = state.world.rooms.find(item => item.name === roomName);
+    takeLoot(before);
+    state.elapsed += 12;
+    respawnLoot();
+    const after = state.loot.find(item => item.spawnId === before.spawnId);
+    assert.ok(after);
+    assert.ok(after.x > room.x * 32 && after.x < (room.x + room.w) * 32);
+    assert.ok(after.y > room.y * 32 && after.y < (room.y + room.h) * 32);
+    assert.notEqual(`${after.type}:${after.weapon}`, `${before.type}:${before.weapon}`);
+    if (roomName === 'ARMORY') assert.equal(WEAPONS[after.weapon].kind, 'gun');
+    else assert.ok(['health', 'armor'].includes(after.type));
+  }
+});
+
+test('deathmatch bots roll varied starter weapons on spawn and respawn', () => {
+  let seed = 3871;
+  const random = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+  const { state, generateWorld, spawnBot, respawnBot, WEAPONS } = loadGameLogic(random);
+  state.mode = 'pvp';
+  generateWorld('pvp');
+  state.player = { alive: false, team: 'blue', x: 0, y: 0 };
+  state.bots = [];
+  state.enemies = [];
+  for (let i = 0; i < 24; i++) spawnBot(i % 2 ? 'red' : 'blue', i);
+  const starters = new Set(state.bots.map(bot => bot.inventory[1]));
+  assert.ok(starters.size >= 5, 'bots should not all start with the same SMG');
+  for (const bot of state.bots) {
+    assert.equal(bot.inventory[0], 0);
+    assert.ok(bot.inventory.slice(2).every(slot => slot == null));
+    if (bot.inventory[1] != null && WEAPONS[bot.inventory[1]].kind === 'gun') assert.equal(bot.ammo[bot.inventory[1]], WEAPONS[bot.inventory[1]].magazine);
+    const zone = state.world.spawnZones[bot.team === 'blue' ? 0 : 1];
+    assert.ok(Math.hypot(bot.x - zone.x, bot.y - zone.y) < 8 * 32);
+  }
+  const bot = state.bots[0], respawnStarters = new Set();
+  for (let i = 0; i < 20; i++) {
+    bot.alive = false;
+    respawnBot(bot);
+    assert.equal(bot.alive, true);
+    assert.equal(bot.inventory[0], 0);
+    assert.ok(bot.inventory[1] == null || WEAPONS[bot.inventory[1]]);
+    respawnStarters.add(bot.inventory[1]);
+  }
+  assert.ok(respawnStarters.size >= 5, 'bot respawns should also reroll their gear');
 });
 
 test('larger maps receive more supplies without flooding them with weapons', () => {

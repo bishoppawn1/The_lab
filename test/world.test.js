@@ -6,10 +6,11 @@ import vm from 'node:vm';
 const source = readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
 const definitions = source.slice(0, source.indexOf("$('#select-survival').addEventListener"));
 
-function loadGameLogic() {
+function loadGameLogic(random) {
   const element = { getContext: () => ({}) };
   const context = { document: { querySelector: () => element } };
-  vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, generateWorld, spawnLoot, takeLoot, respawnLoot, firingLaneClear, updateBot, updateEnemy, botPickupLoot, hit, shoot };`, context);
+  if (random) context.Math = Object.assign(Object.create(Math), { random });
+  vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, WEAPONS, generateWorld, spawnLoot, takeLoot, respawnLoot, firingLaneClear, updateBot, updateEnemy, botCanTakeLoot, botPickupLoot, hit, shoot, advanceBullet };`, context);
   return context.lab;
 }
 
@@ -295,7 +296,7 @@ test('bots drop collected weapons and supplies once when eliminated', () => {
     { x: 80, y: 80, type: 'grenade', label: 'GRENADE', color: '#dd8e68' },
     { x: 80, y: 80, type: 'armor', label: 'ARMOR', color: '#78b5de' },
   ];
-  const red = { x: 80, y: 80, r: 10, hp: 20, maxHp: 100, armor: 0, team: 'red', alive: true, ai: true, inventory: [0, 1, null, null], active: 0, ammo: { 1: 30 }, pickedSlots: [false, false, false, false] };
+  const red = { x: 80, y: 80, r: 10, hp: 20, maxHp: 100, armor: 0, team: 'red', alive: true, ai: true, inventory: [0, 1, null, null], active: 0, ammo: { 1: 30 }, pickedSlots: [false, false, false, false], pickupRoll: () => 0 };
   const blue = { x: 120, y: 80, team: 'blue' };
   state.bots = [red];
   botPickupLoot(red);
@@ -311,6 +312,74 @@ test('bots drop collected weapons and supplies once when eliminated', () => {
   assert.equal(state.loot.find(item => item.type === 'grenade').count, 1);
   hit(red, 70, blue);
   assert.equal(state.loot.length, 3, 'dead bots must not drop the same gear twice');
+});
+
+test('bots reject an inferior same-family gun but consider a new role', () => {
+  const { state, botCanTakeLoot, botPickupLoot } = loadGameLogic();
+  state.mode = 'pvp';
+  state.player = { alive: false, team: 'blue', x: 0, y: 0 };
+  state.lootRespawns = [];
+  state.loot = [
+    { x: 80, y: 80, type: 'weapon', weapon: 1, label: 'SMG', color: '#eabf72' },
+    { x: 80, y: 80, type: 'weapon', weapon: 3, label: 'RIFLE', color: '#d9c786' },
+  ];
+  const bot = { x: 80, y: 80, r: 10, alive: true, team: 'red', inventory: [0, 8, null, null], ammo: {}, pickedSlots: [false, false, false, false], pickupRoll: () => 0 };
+  state.bots = [bot];
+  state.enemies = [];
+  assert.equal(botCanTakeLoot(bot, state.loot[0]), false);
+  assert.equal(botCanTakeLoot(bot, state.loot[1]), true);
+  botPickupLoot(bot);
+  assert.equal(bot.inventory[1], 8, 'rare SMG should be retained');
+  assert.ok(bot.inventory.includes(3), 'the rifle adds longer-range coverage');
+  assert.equal(state.loot.some(item => item.weapon === 1), true, 'inferior SMG should remain on the ground');
+});
+
+test('bots may pass on a situational weapon instead of always taking it', () => {
+  const { state, botCanTakeLoot } = loadGameLogic();
+  const knife = { type: 'weapon', weapon: 4 };
+  const bot = { x: 0, y: 0, alive: true, inventory: [0, 1, null, null], pickupRoll: () => .99 };
+  assert.equal(botCanTakeLoot(bot, knife), false);
+  bot.pickupRoll = () => 0;
+  assert.equal(botCanTakeLoot(bot, { ...knife }), true);
+});
+
+test('bullets leave the gun in a straight line and hit between frames', () => {
+  const { state, shoot, advanceBullet } = loadGameLogic(() => .5);
+  state.world = { w: 20, h: 8, tile: 32, map: Array.from({ length: 8 }, () => Array(20).fill(0)) };
+  state.mode = 'pvp';
+  state.particles = [];
+  state.bullets = [];
+  state.player = { alive: false, team: 'blue', x: 0, y: 0 };
+  const owner = { x: 80, y: 80, r: 10, alive: true, team: 'red', inventory: [1, 3, null, null], active: 0 };
+  const target = { x: 113, y: 80, r: 10, hp: 100, maxHp: 100, armor: 0, invuln: 0, alive: true, team: 'blue' };
+  state.bots = [owner, target];
+  shoot(owner, Math.PI / 4, 1000);
+  const smgBullet = state.bullets.pop();
+  assert.ok(Math.abs(smgBullet.x - (owner.x + Math.cos(Math.PI / 4) * 18)) < 1e-9);
+  assert.ok(Math.abs(smgBullet.y - (owner.y + Math.sin(Math.PI / 4) * 18)) < 1e-9);
+  assert.ok(Math.abs(smgBullet.vy / smgBullet.vx - 1) < 1e-9, 'SMG round should follow the aim exactly');
+  owner.active = 1;
+  shoot(owner, 0, 1100);
+  const rifleBullet = state.bullets.pop();
+  advanceBullet(rifleBullet, .045);
+  assert.equal(target.hp, 66, 'swept collision should hit even when the frame endpoint passes the target');
+});
+
+test('a close shotgun blast deals substantial damage and pellets share a muzzle', () => {
+  const { state, shoot, advanceBullet, WEAPONS } = loadGameLogic(() => .5);
+  state.world = { w: 20, h: 8, tile: 32, map: Array.from({ length: 8 }, () => Array(20).fill(0)) };
+  state.mode = 'pvp';
+  state.particles = [];
+  state.bullets = [];
+  state.player = { alive: false, team: 'blue', x: 0, y: 0 };
+  const owner = { x: 80, y: 80, r: 10, alive: true, team: 'red', inventory: [2, null, null, null], active: 0 };
+  const target = { x: 130, y: 80, r: 10, hp: 150, maxHp: 150, armor: 0, invuln: 0, alive: true, team: 'blue' };
+  state.bots = [owner, target];
+  shoot(owner, 0, 1000);
+  assert.equal(state.bullets.length, WEAPONS[2].pellets);
+  assert.equal(new Set(state.bullets.map(bullet => `${bullet.x},${bullet.y}`)).size, 1);
+  for (const bullet of state.bullets) advanceBullet(bullet, .08);
+  assert.equal(target.hp, 150 - WEAPONS[2].damage * WEAPONS[2].pellets);
 });
 
 test('melee bots close into range and their swing can hit the player', () => {

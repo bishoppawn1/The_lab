@@ -9,7 +9,7 @@ const definitions = source.slice(0, source.indexOf("$('#select-survival').addEve
 function loadGameLogic() {
   const element = { getContext: () => ({}) };
   const context = { document: { querySelector: () => element } };
-  vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, generateWorld, spawnLoot, takeLoot, respawnLoot, firingLaneClear, updateBot };`, context);
+  vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, generateWorld, spawnLoot, takeLoot, respawnLoot, firingLaneClear, updateBot, updateEnemy };`, context);
   return context.lab;
 }
 
@@ -71,7 +71,10 @@ test('collected world loot returns to its original location', () => {
   const pickup = state.loot[0];
   assert.equal(takeLoot(pickup), true);
   assert.equal(state.loot.some(item => item.spawnId === pickup.spawnId), false);
-  state.elapsed = 36;
+  state.elapsed = 19;
+  respawnLoot();
+  assert.equal(state.loot.some(item => item.spawnId === pickup.spawnId), false);
+  state.elapsed = 20;
   respawnLoot();
   const returned = state.loot.find(item => item.spawnId === pickup.spawnId);
   assert.ok(returned);
@@ -140,4 +143,41 @@ test('opposing bots move around a close corner instead of stopping at the wall',
   }
   assert.ok(blue.y > 112 + 10, 'blue should follow its route toward the corner');
   assert.ok(red.x < 144 - 10, 'red should follow its route toward the corner');
+});
+
+test('hostile bots and monsters acquire the player only within sight range and without walls', () => {
+  const { state, updateBot, updateEnemy } = loadGameLogic();
+  const map = Array.from({ length: 18 }, (_, y) => Array.from({ length: 25 }, (_, x) => x === 0 || y === 0 || x === 24 || y === 17 ? 1 : 0));
+  state.world = { w: 25, h: 18, tile: 32, map };
+  state.mode = 'pvp';
+  state.loot = [];
+  state.player = { x: 19.5 * 32, y: 5.5 * 32, r: 11, team: 'blue', alive: true };
+  const bot = { x: 5.5 * 32, y: 5.5 * 32, r: 10, speed: 0, team: 'red', alive: true, inventory: [0, null, null, null], active: 0, ammo: {}, think: 0, fireTime: Infinity, invuln: 0, hitFlash: 0 };
+  state.bots = [bot];
+  updateBot(bot, 0.016, 1000);
+  assert.equal(bot.target, null, 'distant player should not be selected');
+  state.player.x = 12.5 * 32;
+  bot.think = 0;
+  updateBot(bot, 0.016, 1016);
+  assert.equal(bot.target, state.player, 'nearby visible player should be selected');
+  map[5][9] = 1;
+  bot.think = 0;
+  updateBot(bot, 0.016, 1032);
+  assert.equal(bot.target, null, 'wall should break the player lock');
+
+  state.mode = 'survival';
+  state.bots = [];
+  state.enemies = [];
+  const monster = { x: 5.5 * 32, y: 5.5 * 32, r: 9, speed: 0, type: 'monster', variant: 'crawler', alive: true, think: 0, fireTime: Infinity, invuln: 0, hitFlash: 0 };
+  state.enemies = [monster];
+  updateEnemy(monster, 0.016, 1048);
+  assert.equal(monster.target, null, 'monster should not see the player through a wall');
+  map[5][9] = 0;
+  monster.think = 0;
+  updateEnemy(monster, 0.016, 1064);
+  assert.equal(monster.target, state.player);
+  state.player.x = 19.5 * 32;
+  monster.think = 0;
+  updateEnemy(monster, 0.016, 1080);
+  assert.equal(monster.target, null, 'monster should lose a distant player');
 });

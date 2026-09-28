@@ -34,6 +34,7 @@ const LOOT_TABLE = [
 ];
 const SUPPLY_LOOT = LOOT_TABLE.filter(item=>item.type!=='weapon');
 const ARENA_STARTERS=[null,null,null,null,1,1,2,2,3,3,4,5,6,11,12,13,15,16,7,8,9,10,14];
+const PLAYER_VIEW_TILES = 14;
 const PLAYER_SIGHT_RANGE = 320;
 const BOT_SIGHT_RANGE = 420;
 const LOOT_RESPAWN_SECONDS = 6;
@@ -231,8 +232,34 @@ function update(dt,now){const p=state.player;if(!p)return;const cx=Number(canvas
   else{state.bots=state.bots.filter(b=>b.alive||b.respawn>0);if(!p.alive){p.respawn-=dt;if(p.respawn<=0)respawnPlayer();}$('#blue-score').textContent=String(state.scoreBlue);$('#red-score').textContent=String(state.scoreRed);if(state.scoreBlue>=state.settings.target)finish(state.player.team==='blue','BLUE TEAM WINS',`Final score ${state.scoreBlue} : ${state.scoreRed}`);else if(state.scoreRed>=state.settings.target)finish(state.player.team==='red','RED TEAM WINS',`Final score ${state.scoreBlue} : ${state.scoreRed}`);}
 }
 function blocked(x,y,radius=7){const t=state.world.tile,checks=[[x-radius,y-radius],[x+radius,y-radius],[x-radius,y+radius],[x+radius,y+radius]];return checks.some(([cx,cy])=>{const tx=Math.floor(cx/t),ty=Math.floor(cy/t);return !floorTile(tx,ty)||state.world.doorTiles?.get(`${tx},${ty}`)?.open===false;});}
-function nearbyDoor(actor,radius=54){return state.world?.doors?.filter(door=>!door.open&&dist(actor,{x:door.cx,y:door.cy})<radius).sort((a,b)=>dist(actor,{x:a.cx,y:a.cy})-dist(actor,{x:b.cx,y:b.cy}))[0]||null;}
-function unlockDoor(door,actor=null){if(!door||door.open)return false;door.open=true;state.world.visionAt=-Infinity;if(actor===state.player)announce(`${door.room.name} UNLOCKED`);return true;}
+function nearbyDoor(actor,radius=54,closedOnly=false){
+  const t=state.world?.tile||32;
+  return state.world?.doors?.filter(door=>{
+    if(closedOnly&&door.open||dist(actor,{x:door.cx,y:door.cy})>=radius)return false;
+    const edge={x:clamp(actor.x,door.x*t,(door.x+2)*t),y:clamp(actor.y,door.y*t,(door.y+1)*t)};
+    return lineClear(actor,edge,0);
+  }).sort((a,b)=>dist(actor,{x:a.cx,y:a.cy})-dist(actor,{x:b.cx,y:b.cy}))[0]||null;
+}
+function setDoorOpen(door,open,actor=null){
+  if(!door||door.open===open)return false;
+  const t=state.world.tile;
+  if(!open&&[state.player,...state.bots,...state.enemies].some(unit=>unit?.alive&&unit.x+(unit.r||10)>door.x*t&&unit.x-(unit.r||10)<(door.x+2)*t&&unit.y+(unit.r||10)>door.y*t&&unit.y-(unit.r||10)<(door.y+1)*t)){
+    if(actor===state.player)announce('DOORWAY BLOCKED — STEP CLEAR');
+    return false;
+  }
+  door.open=open;state.world.visionAt=-Infinity;
+  if(actor===state.player)announce(`${door.room.name} ${open?'OPENED':'CLOSED'}`);
+  return true;
+}
+function nearbyInteraction(){
+  const p=state.player;if(!p?.alive)return null;
+  if(state.mode==='survival'&&dist(p,state.world.exit)<state.world.exit.r+15)return{type:'exit'};
+  const door=nearbyDoor(p);
+  if(door&&!door.open)return{type:'door',door};
+  const item=state.loot.filter(item=>dist(p,item)<39&&visibleAt(item.x,item.y)&&lineClear(p,item)).sort((a,b)=>dist(p,a)-dist(p,b))[0];
+  if(item)return{type:'loot',item};
+  return door?{type:'door',door}:null;
+}
 function bulletTargets(bullet){
   const owner=bullet.owner,p=state.player;
   if(state.mode==='pvp'&&owner?.team)return[p,...state.bots].filter(target=>target&&target!==owner&&target.alive&&target.team!==owner.team);
@@ -251,7 +278,7 @@ function advanceBullet(bullet,dt){
   }
   bullet.life-=dt;if(bullet.life<=0)bullet.dead=true;
 }
-function updateVision(now){const world=state.world;if(now-world.visionAt<180)return;world.visionAt=now;world.visible.clear();const p=state.player,observers=p?.alive?[p]:[];if(state.mode==='pvp')observers.push(...state.bots.filter(b=>b.alive&&b.team===p.team));else observers.push(...state.enemies.filter(e=>e.alive&&e.type==='guard'&&e.team===p.team));const radius=state.mode==='pvp'?9:8;for(const actor of observers){const tx=Math.floor(actor.x/32),ty=Math.floor(actor.y/32);for(let y=Math.max(1,ty-radius);y<=Math.min(world.h-2,ty+radius);y++)for(let x=Math.max(1,tx-radius);x<=Math.min(world.w-2,tx+radius);x++){if(Math.hypot(x-tx,y-ty)>radius||!floorTile(x,y))continue;const center={x:(x+.5)*32,y:(y+.5)*32};if(lineClear(actor,center)){const key=`${x},${y}`;world.visible.add(key);world.explored.add(key);}}}}
+function updateVision(now){const world=state.world;if(now-world.visionAt<180)return;world.visionAt=now;world.visible.clear();const p=state.player,observers=p?.alive?[p]:[];if(state.mode==='pvp')observers.push(...state.bots.filter(b=>b.alive&&b.team===p.team));else observers.push(...state.enemies.filter(e=>e.alive&&e.type==='guard'&&e.team===p.team));for(const actor of observers){const radius=actor===p?PLAYER_VIEW_TILES:state.mode==='pvp'?9:8;const tx=Math.floor(actor.x/32),ty=Math.floor(actor.y/32);for(let y=Math.max(1,ty-radius);y<=Math.min(world.h-2,ty+radius);y++)for(let x=Math.max(1,tx-radius);x<=Math.min(world.w-2,tx+radius);x++){if(Math.hypot(x-tx,y-ty)>radius||!floorTile(x,y))continue;const center={x:(x+.5)*32,y:(y+.5)*32};if(lineClear(actor,center)){const key=`${x},${y}`;world.visible.add(key);world.explored.add(key);}}}}
 function move(e,dx,dy){const nx=e.x+dx,ny=e.y+dy,r=Math.max(5,(e.r||10)-1);if(!blocked(nx,e.y,r))e.x=nx;if(!blocked(e.x,ny,r))e.y=ny;}
 function reloadWeapon(now=performance.now()){const p=state.player,id=p?.inventory[p.active],w=id==null?null:WEAPONS[id];if(!p||!w||w.kind!=='gun'||(p.ammo[id]??w.magazine)>=w.magazine||p.reloadUntil>now)return;p.reloadingWeapon=id;p.reloadUntil=now+(w.family===2&&w.name!=='Auto Shotgun'?1050:780);$('#reload-status').textContent='RELOADING…';log(`${w.name} reloading.`);}
 function shoot(entity,angle,now){
@@ -376,7 +403,7 @@ function botUseMedkit(bot){
 function updateBot(bot,dt,now){
   if(bot.invuln>0)bot.invuln=Math.max(0,bot.invuln-dt);
   if(bot.hitFlash>0)bot.hitFlash-=dt;
-  if(state.mode==='pvp')unlockDoor(nearbyDoor(bot,37),bot);
+  if(state.mode==='pvp')setDoorOpen(nearbyDoor(bot,37,true),true,bot);
   bot.think-=dt;botPickupLoot(bot);botUseMedkit(bot);
   if(bot.think<=0){
     bot.think=rand(.24,.4);
@@ -427,7 +454,7 @@ function respawnPlayer(){const p=state.player,zone=state.world.spawnZones[p.team
 function burst(x,y,color,n){for(let i=0;i<n;i++)state.particles.push({x,y,vx:rand(-95,95),vy:rand(-95,95),life:rand(.12,.42),max:.42,color,r:rand(1,3)});}
 function muzzle(x,y,color){for(let i=0;i<3;i++)state.particles.push({x,y,vx:rand(-30,30),vy:rand(-30,30),life:.07,max:.07,color,r:rand(2,4)});}
 function useGrenade(aimAngle=null){const p=state.player;if(!p?.alive){announce('NO GRENADES');return;}const index=p.inventory.findIndex(slot=>slot?.item==='grenade');if(index<0){announce('NO GRENADES');return;}const stack=p.inventory[index];stack.count--;if(stack.count<=0)p.inventory[index]=null;p.fireAt=performance.now()+360;$('#grenade-count').textContent=String(inventoryGrenades());renderWeapons();const tx=state.mouse.x+state.camera.x,ty=state.mouse.y+state.camera.y,angle=aimAngle??Math.atan2(ty-p.y,tx-p.x);const x=p.x+Math.cos(angle)*GRENADE_THROW_DISTANCE,y=p.y+Math.sin(angle)*GRENADE_THROW_DISTANCE;state.particles.push({x,y,vx:0,vy:0,life:.45,max:.45,color:'#dd8e68',r:9,grenade:true});const runId=state.runId;setTimeout(()=>{if(!state.running||runId!==state.runId)return;burst(x,y,'#e78e62',23);for(const t of state.mode==='pvp'?state.bots:state.enemies)if(t.alive&&dist({x,y},t)<112)hit(t,115*(1-dist({x,y},t)/180),p);sound(80,'sawtooth',.25,.065);},450);sound(110,'triangle',.09,.02);}
-function interact(){const p=state.player;if(!p?.alive)return;if(state.mode==='survival'&&dist(p,state.world.exit)<state.world.exit.r+15){finish(true,'EXTRACTION CONFIRMED','You reached the extraction zone.');return;}const door=nearbyDoor(p);if(door){unlockDoor(door,p);return;}const item=state.loot.find(x=>dist(p,x)<39&&visibleAt(x.x,x.y)&&lineClear(p,x));if(!item){announce('NOTHING IN REACH');return;}if(item.type==='weapon'){const slot=p.inventory.findIndex(value=>value==null);if(slot>=0){p.inventory[slot]=item.weapon;p.ammo[item.weapon]=WEAPONS[item.weapon].magazine;takeLoot(item);p.active=slot;log(`${item.label} added to slot ${slot+1}.`,'good');announce(`${item.label} COLLECTED`);}else{state.pendingLoot=item;$('#inventory-prompt').textContent=`${item.label} FOUND — SELECT A SLOT BELOW TO SWAP`;$('#inventory-prompt').classList.remove('hidden');announce(`${item.label} READY TO EQUIP`);renderWeapons();return;}}else if(item.type==='health'||item.type==='grenade'){const slotType=item.type==='health'?'health':'grenade',existing=p.inventory.findIndex(value=>value?.item===slotType),free=p.inventory.findIndex(value=>value==null);if(existing>=0){p.inventory[existing].count+=(item.count||1);}else if(free>=0){p.inventory[free]={item:slotType,count:item.count||1};p.active=free;}else{state.pendingLoot=item;$('#inventory-prompt').textContent=`${item.label} FOUND — SELECT A SLOT BELOW TO SWAP`;$('#inventory-prompt').classList.remove('hidden');announce(`${item.label} NEEDS AN INVENTORY SLOT`);renderWeapons();return;}takeLoot(item);announce(`${item.label} ADDED TO INVENTORY`);log(`${inventoryItemLabel({item:slotType})} stored in inventory.`,'good');}else if(item.type==='armor'){p.armor=Math.min(100,p.armor+50);log('Armor equipped.','good');}takeLoot(item);state.found++;$('#loot-count').textContent=String(state.found);if(item.type==='armor')announce(`${item.label} COLLECTED`);sound(500,'sine',.08,.018);$('#grenade-count').textContent=String(inventoryGrenades());renderWeapons();}
+function interact(){const p=state.player;if(!state.running||state.paused||!p?.alive)return;const action=nearbyInteraction();if(!action){announce('NOTHING IN REACH');return;}if(action.type==='exit'){finish(true,'EXTRACTION CONFIRMED','You reached the extraction zone.');return;}if(action.type==='door'){setDoorOpen(action.door,!action.door.open,p);return;}const item=action.item;if(item.type==='weapon'){const slot=p.inventory.findIndex(value=>value==null);if(slot>=0){p.inventory[slot]=item.weapon;p.ammo[item.weapon]=WEAPONS[item.weapon].magazine;takeLoot(item);p.active=slot;log(`${item.label} added to slot ${slot+1}.`,'good');announce(`${item.label} COLLECTED`);}else{state.pendingLoot=item;$('#inventory-prompt').textContent=`${item.label} FOUND — SELECT A SLOT BELOW TO SWAP`;$('#inventory-prompt').classList.remove('hidden');announce(`${item.label} READY TO EQUIP`);renderWeapons();return;}}else if(item.type==='health'||item.type==='grenade'){const slotType=item.type==='health'?'health':'grenade',existing=p.inventory.findIndex(value=>value?.item===slotType),free=p.inventory.findIndex(value=>value==null);if(existing>=0){p.inventory[existing].count+=(item.count||1);}else if(free>=0){p.inventory[free]={item:slotType,count:item.count||1};p.active=free;}else{state.pendingLoot=item;$('#inventory-prompt').textContent=`${item.label} FOUND — SELECT A SLOT BELOW TO SWAP`;$('#inventory-prompt').classList.remove('hidden');announce(`${item.label} NEEDS AN INVENTORY SLOT`);renderWeapons();return;}takeLoot(item);announce(`${item.label} ADDED TO INVENTORY`);log(`${inventoryItemLabel({item:slotType})} stored in inventory.`,'good');}else if(item.type==='armor'){p.armor=Math.min(100,p.armor+50);log('Armor equipped.','good');}takeLoot(item);state.found++;$('#loot-count').textContent=String(state.found);if(item.type==='armor')announce(`${item.label} COLLECTED`);sound(500,'sine',.08,.018);$('#grenade-count').textContent=String(inventoryGrenades());renderWeapons();}
 function finish(won,title,copy){if(state.roundEnd)return;state.roundEnd=true;state.running=false;$('#result-title').innerHTML=title.replace(' ','<br>');$('#result-copy').textContent=copy;$('#result-eyebrow').textContent=won?'OPERATION COMPLETE':'OPERATION FAILED';$('#end-overlay').classList.remove('hidden');}
 function togglePause(){if(!state.running)return;state.paused=!state.paused;$('#pause-overlay').classList.toggle('hidden',!state.paused);game.classList.toggle('paused',state.paused);if(!state.paused)state.lastTime=performance.now();}
 function updateHUD(){
@@ -439,9 +466,8 @@ function updateHUD(){
   $('#clock').textContent=`${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}`;
   const alive=state.mode==='survival'?state.enemies.filter(e=>e.alive&&e.type==='monster').length:state.bots.filter(b=>b.alive&&b.team!==p.team).length;
   $('#threat-count').textContent=String(alive);
-  const door=nearbyDoor(p,58),closest=state.loot.filter(item=>dist(p,item)<45&&visibleAt(item.x,item.y)&&lineClear(p,item)).sort((a,b)=>dist(p,a)-dist(p,b))[0];
-  const extraction=state.mode==='survival'&&dist(p,state.world.exit)<state.world.exit.r+20;
-  const prompt=door?`[ E ] UNLOCK ${door.room.name}`:extraction?'[ E ] EXTRACT':closest?`[ E ] PICK UP ${closest.label}`:'';
+  const action=nearbyInteraction();
+  const prompt=action?.type==='door'?`[ E ] ${action.door.open?'CLOSE':'OPEN'} ${action.door.room.name}`:action?.type==='exit'?'[ E ] EXTRACT':action?.type==='loot'?`[ E ] PICK UP ${action.item.label}`:'';
   $('#context-prompt').classList.toggle('hidden',!prompt);if(prompt)$('#context-prompt').textContent=prompt;
   if(state.mode==='survival')$('#objective-detail').textContent=dist(p,state.world.exit)<220?'Extraction zone nearby':`${Math.max(0,Math.round(dist(p,state.world.exit)/32))} m to extraction`;
 }
@@ -463,11 +489,11 @@ function drawRoomProps(){
 }
 function drawDoors(){
   for(const door of state.world.doors){
-    if(!visibleAt(door.approach.x,door.approach.y)&&!visibleAt(door.cx,door.cy))continue;
+    if(!visibleAt(door.approach.x,door.approach.y)&&!visibleAt(door.cx,2*door.cy-door.approach.y)&&!visibleAt(door.cx,door.cy))continue;
     const x=door.x*32-state.camera.x,y=door.y*32-state.camera.y;
     ctx.save();ctx.fillStyle=door.open?'#91bd8d55':'#302e22';ctx.strokeStyle=door.open?'#a4d59a':'#d9bd72';ctx.lineWidth=2;
-    ctx.fillRect(x+2,y+8,60,16);ctx.strokeRect(x+2,y+8,60,16);
-    if(!door.open){ctx.fillStyle='#e6cf83';ctx.font='bold 8px "IBM Plex Mono"';ctx.textAlign='center';ctx.fillText('LOCKED',x+32,y+19);}
+    if(door.open){for(const offset of [2,54]){ctx.fillRect(x+offset,y+8,8,16);ctx.strokeRect(x+offset,y+8,8,16);}}
+    else{ctx.fillRect(x+2,y+8,60,16);ctx.strokeRect(x+2,y+8,60,16);ctx.fillStyle='#e6cf83';ctx.font='bold 8px "IBM Plex Mono"';ctx.textAlign='center';ctx.fillText('CLOSED',x+32,y+19);}
     ctx.restore();
   }
 }
@@ -485,7 +511,7 @@ function render(now){const W=Number(canvas.dataset.cssWidth)||600,H=Number(canva
   for(const b of state.bullets){const x=b.x-state.camera.x,y=b.y-state.camera.y;ctx.save();ctx.translate(x,y);ctx.rotate(Math.atan2(b.vy,b.vx));ctx.shadowColor=b.color;ctx.shadowBlur=9;ctx.strokeStyle=b.color;ctx.lineWidth=b.acid?3:2;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(-15,0);ctx.lineTo(-3,0);ctx.stroke();ctx.fillStyle=b.acid?'#b5f28a':'#fff5d8';ctx.beginPath();ctx.ellipse(0,0,b.acid?3.3:3,b.acid?2.3:1.6,0,0,Math.PI*2);ctx.fill();ctx.restore();}
   for(const e of state.enemies)if(e.alive)drawEntity(e,e.type==='monster'?'#cf6350':e.team===state.player.team?COLORS.blue:'#bb7459',now,e.type==='guard'?(e.team===state.player.team?'ALLY GUARD':'GUARD'):e.variant?.toUpperCase()||'');for(const b of state.bots)if(b.alive)drawEntity(b,b.team==='blue'?COLORS.blue:COLORS.red,now,b.team===state.player.team?'ALLY':'HOSTILE');if(state.player?.alive)drawEntity(state.player,COLORS.lime,now,'YOU');for(const part of state.particles){const x=part.x-state.camera.x,y=part.y-state.camera.y;ctx.globalAlpha=clamp(part.life/part.max,0,1);ctx.fillStyle=part.color;if(part.grenade){ctx.beginPath();ctx.arc(x,y,part.r,0,Math.PI*2);ctx.fill();}else{ctx.beginPath();ctx.arc(x,y,part.r,0,Math.PI*2);ctx.fill();}}ctx.globalAlpha=1;
   drawVisionFog(sx,sy,ex,ey);drawDoors();
-  if(state.mode==='survival'&&!state.visibleMap){const px=state.player.x-state.camera.x,py=state.player.y-state.camera.y;const gradient=ctx.createRadialGradient(px,py,80,px,py,330);gradient.addColorStop(0,'#0000');gradient.addColorStop(.65,'#0002');gradient.addColorStop(1,'#060907c9');ctx.fillStyle=gradient;ctx.fillRect(0,0,W,H);}
+  if(state.mode==='survival'&&!state.visibleMap){const px=state.player.x-state.camera.x,py=state.player.y-state.camera.y;const gradient=ctx.createRadialGradient(px,py,120,px,py,(PLAYER_VIEW_TILES+2)*t);gradient.addColorStop(0,'#0000');gradient.addColorStop(.65,'#0002');gradient.addColorStop(1,'#060907c9');ctx.fillStyle=gradient;ctx.fillRect(0,0,W,H);}
   if(state.visibleMap)drawFullMap(W,H);}
 function drawHeldWeapon(id){const w=WEAPONS[id]||WEAPONS[0];ctx.save();ctx.lineCap='round';ctx.lineJoin='round';if(w.kind==='gun'){ctx.fillStyle='#131a16';ctx.strokeStyle='#c8d0c3';ctx.lineWidth=.8;ctx.beginPath();ctx.roundRect(2,-3.7,20,7.4,1);ctx.fill();ctx.stroke();ctx.fillStyle=w.color;if(w.family===0){ctx.fillRect(6,-4,12,2);ctx.fillRect(21,-1.7,7,3.4);ctx.fillStyle='#343c35';ctx.beginPath();ctx.moveTo(11,3);ctx.lineTo(17,3);ctx.lineTo(19,9);ctx.lineTo(14,9);ctx.closePath();ctx.fill();}
     else if(w.family===1){ctx.fillRect(3,-2,5,2);ctx.fillRect(6,-5,14,2);ctx.fillRect(21,-1.6,8,3.2);ctx.fillStyle='#343c35';ctx.fillRect(11,3,4,6);ctx.fillRect(1,1,4,4);if(id===12){ctx.fillStyle=w.color;ctx.beginPath();ctx.arc(15,6,5,0,Math.PI*2);ctx.fill();}}
@@ -535,7 +561,7 @@ function drawFullMap(W,H){
   ctx.fillStyle='#f0f4e8';ctx.beginPath();ctx.arc(ox+state.player.x*scale,oy+state.player.y*scale,4,0,Math.PI*2);ctx.fill();ctx.font='8px "IBM Plex Mono"';ctx.textAlign='left';ctx.fillStyle='#c0ef75';ctx.fillText(state.mode==='survival'?'FACILITY 07-C · EXPLORED AREAS':'ARENA A-01 · TEAM VISION',ox,oy-9);ctx.restore();
 }
 
-function onKeyDown(e){const key=e.key.toLowerCase();if([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(key))e.preventDefault();if(key==='escape'||key==='p'){togglePause();return;}if(key==='m'&&state.running){state.visibleMap=!state.visibleMap;$('#map-status').textContent=state.visibleMap?'— FULL MAP':state.mode==='pvp'?'— TEAM VISION':'— EXPLORE';return;}if(key==='e'){interact();return;}if(key==='g'){useGrenade();return;}if(key==='r'){reloadWeapon();return;}if(key>='1'&&key<='4'){equip(Number(key)-1);return;}state.keys.add(key);}
+function onKeyDown(e){const key=e.key.toLowerCase();if([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(key))e.preventDefault();if(key==='escape'||key==='p'){togglePause();return;}if(key==='m'&&state.running){state.visibleMap=!state.visibleMap;$('#map-status').textContent=state.visibleMap?'— FULL MAP':state.mode==='pvp'?'— TEAM VISION':'— EXPLORE';return;}if(key==='e'){if(!e.repeat)interact();return;}if(key==='g'){useGrenade();return;}if(key==='r'){reloadWeapon();return;}if(key>='1'&&key<='4'){equip(Number(key)-1);return;}state.keys.add(key);}
 function onKeyUp(e){state.keys.delete(e.key.toLowerCase());}
 function pointerPosition(e){const r=canvas.getBoundingClientRect();state.mouse.x=e.clientX-r.left;state.mouse.y=e.clientY-r.top;}
 $('#select-survival').addEventListener('click',()=>openSetup('survival'));$('#select-pvp').addEventListener('click',()=>openSetup('pvp'));$('#setup-back').addEventListener('click',showMenu);$('#back-menu').addEventListener('click',showMenu);$('#start-button').addEventListener('click',startGame);$('#pause-button').addEventListener('click',togglePause);$('#resume-button').addEventListener('click',togglePause);$('#pause-quit').addEventListener('click',showMenu);$('#restart-button').addEventListener('click',()=>openSetup(state.mode));$('#end-menu').addEventListener('click',showMenu);$('#map-toggle').addEventListener('click',()=>{state.visibleMap=!state.visibleMap;$('#map-status').textContent=state.visibleMap?'— FULL MAP':state.mode==='pvp'?'— TEAM VISION':'— EXPLORE';});

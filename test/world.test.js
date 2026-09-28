@@ -10,7 +10,7 @@ function loadGameLogic(random) {
   const element = { getContext: () => ({}), classList: { add() {}, remove() {} }, appendChild() {}, addEventListener() {}, setAttribute() {}, dataset: {}, style: {} };
   const context = { document: { querySelector: () => element, createElement: () => ({ ...element, dataset: {} }) }, performance: { now: () => 1000 } };
   if (random) context.Math = Object.assign(Object.create(Math), { random });
-  vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, WEAPONS, generateWorld, spawnLoot, takeLoot, respawnLoot, spawnAmbientLoot, updateLootSpawns, buildPlayer, dropPlayerLoadout, respawnPlayer, spawnBot, respawnBot, blocked, lineClear, interact, unlockDoor, updateVision, seedRoomThreats, spawnEnemy, firingLaneClear, updateBot, updateEnemy, botCanTakeLoot, botPickupLoot, hit, shoot, advanceBullet };`, context);
+  vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, WEAPONS, generateWorld, spawnLoot, takeLoot, respawnLoot, spawnAmbientLoot, updateLootSpawns, buildPlayer, dropPlayerLoadout, respawnPlayer, spawnBot, respawnBot, blocked, lineClear, interact, setDoorOpen, updateVision, seedRoomThreats, spawnEnemy, firingLaneClear, updateBot, updateEnemy, botCanTakeLoot, botPickupLoot, hit, shoot, advanceBullet };`, context);
   return context.lab;
 }
 
@@ -226,8 +226,8 @@ test('larger maps receive more supplies without flooding them with weapons', () 
   }
 });
 
-test('closed room doors block movement and sight until unlocked in both modes', () => {
-  const { state, generateWorld, blocked, lineClear, unlockDoor, updateVision } = loadGameLogic();
+test('closed room doors block movement and sight until opened in both modes', () => {
+  const { state, generateWorld, blocked, lineClear, setDoorOpen, updateVision } = loadGameLogic();
   for (const mode of ['survival', 'pvp']) {
     state.mode = mode;
     generateWorld(mode);
@@ -240,7 +240,7 @@ test('closed room doors block movement and sight until unlocked in both modes', 
     assert.equal(lineClear(door.approach, inside), false);
     updateVision(1000);
     assert.equal(state.world.visible.has(`${Math.floor(inside.x / 32)},${Math.floor(inside.y / 32)}`), false);
-    assert.equal(unlockDoor(door), true);
+    assert.equal(setDoorOpen(door,true), true);
     assert.equal(blocked(door.cx, door.cy, 2), false);
     assert.equal(lineClear(door.approach, inside), true);
     updateVision(1200);
@@ -248,7 +248,7 @@ test('closed room doors block movement and sight until unlocked in both modes', 
   }
 });
 
-test('the player unlocks a nearby door with interact and arena bots open doors on approach', () => {
+test('the player opens a nearby door with interact and arena bots open doors on approach', () => {
   const { state, generateWorld, interact, updateBot } = loadGameLogic();
   state.mode = 'survival';
   generateWorld('survival');
@@ -257,6 +257,7 @@ test('the player unlocks a nearby door with interact and arena bots open doors o
   state.loot = [];
   state.bots = [];
   state.enemies = [];
+  state.running = true;
   interact();
   assert.equal(survivalDoor.open, true);
 

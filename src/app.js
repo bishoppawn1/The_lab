@@ -17,14 +17,49 @@ const GRENADE_THROW_DISTANCE = 210;
 const MELEE_SWING_MS = 300;
 function weightedLoot(table=LOOT_TABLE){let value=Math.random()*table.reduce((sum,item)=>sum+item.weight,0);for(const item of table){value-=item.weight;if(value<=0)return item;}return table.at(-1);}
 
-const state = {running:false,paused:false,runId:0,mode:'survival',world:null,player:null,bots:[],enemies:[],bullets:[],loot:[],lootRespawns:[],lootBaseCount:0,lootSpawnTimer:0,ambientLootId:0,particles:[],decor:[],roomProps:[],keys:new Set(),mouse:{x:0,y:0,down:false},touchFire:false,camera:{x:0,y:0},lastTime:0,elapsed:0,fireAt:0,round:1,spawnTimer:0,scoreBlue:0,scoreRed:0,kills:0,found:0,skips:0,teamSize:5,feed:[],visibleMap:false,roundEnd:false,botFill:true,botSightRange:BOT_SIGHT_RANGE,pendingLoot:null,remote:null,settings:{team:'blue',target:50}};
+const state = {running:false,paused:false,runId:0,mode:'survival',world:null,player:null,bots:[],enemies:[],bullets:[],loot:[],lootRespawns:[],lootBaseCount:0,lootSpawnTimer:0,ambientLootId:0,particles:[],decor:[],roomProps:[],keys:new Set(),mouse:{x:0,y:0,down:false},touchFire:false,camera:{x:0,y:0},lastTime:0,elapsed:0,fireAt:0,round:1,spawnTimer:0,scoreBlue:0,scoreRed:0,kills:0,found:0,skips:0,teamSize:5,feed:[],visibleMap:false,roundEnd:false,botFill:true,botSightRange:BOT_SIGHT_RANGE,pendingLoot:null,remote:null,lobby:null,roomAction:'create',settings:{team:'blue',target:50}};
 let lastNotice=0, audioContext=null;
 const rand=(a,b)=>a+Math.random()*(b-a), clamp=(n,a,b)=>Math.max(a,Math.min(b,n)), dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y), choice=a=>a[Math.floor(Math.random()*a.length)];
 
 function clearOperationUi(){for(const id of ['pause-overlay','end-overlay','round-banner','notice','inventory-prompt'])$(`#${id}`).classList.add('hidden');game.classList.remove('paused');state.keys.clear();state.mouse.down=false;state.touchFire=false;state.pendingLoot=null;}
-function closeRemoteMatch(){if(state.remote){state.remote.socket.close();state.remote=null;}}
+function closeRemoteMatch(){
+  state.lobby?.socket.close();
+  state.remote?.socket.close();
+  state.lobby=null;
+  state.remote=null;
+}
 function showMenu(){closeRemoteMatch();state.running=false;state.paused=false;state.runId++;clearOperationUi();menu.classList.remove('hidden');setup.classList.add('hidden');game.classList.add('hidden');}
-function openSetup(mode){closeRemoteMatch();state.running=false;state.paused=false;state.runId++;clearOperationUi();state.mode=mode;state.teamSize=5;state.settings={team:'blue',target:50,difficulty:'standard',loadout:'balanced'};menu.classList.add('hidden');game.classList.add('hidden');setup.classList.remove('hidden');$('#setup-title').innerHTML=mode==='survival'?'LAB<br><span>ESCAPE.</span>':'TEAM<br><span>DEATHMATCH.</span>';$('#setup-subtitle').textContent=mode==='survival'?'Explore the facility, gather supplies, and reach extraction.':'Choose a team size and take your squad into the arena.';$('#setup-options').innerHTML=mode==='survival'?`<div class="config-label">FACILITY CONDITIONS</div><div class="choice-row" id="difficulty-row"><button class="choice selected" data-value="standard">STANDARD</button><button class="choice" data-value="survival">HARDCORE</button><button class="choice" data-value="training">TRAINING</button></div><div class="config-label">FIELD KIT</div><div class="choice-row" id="loadout-row"><button class="choice selected" data-value="balanced">BALANCED</button><button class="choice" data-value="assault">ASSAULT</button><button class="choice" data-value="medic">MEDIC</button></div>`:`<div class="config-label">TEAM SIZE · AI FILL ${state.botFill?'ON':'OFF'}</div><div class="choice-row" id="size-row"><button class="choice selected" data-value="5">5 VS 5</button><button class="choice" data-value="10">10 VS 10</button></div><div class="config-label">YOUR TEAM</div><div class="choice-row" id="team-row"><button class="choice selected" data-value="blue">BLUE TEAM</button><button class="choice" data-value="red">RED TEAM</button></div><div class="config-label">MATCH TARGET</div><div class="choice-row" id="target-row"><button class="choice selected" data-value="50">FIRST TO 50</button><button class="choice" data-value="100">FIRST TO 100</button><button class="choice" data-value="250">FIRST TO 250</button></div>`;$('#start-button').innerHTML=`${mode==='survival'?'BEGIN OPERATION':'ENTER ARENA'} <span>→</span>`;setup.querySelectorAll('.choice-row').forEach(row=>row.addEventListener('click',e=>{const b=e.target.closest('.choice');if(!b)return;row.querySelectorAll('.choice').forEach(x=>x.classList.remove('selected'));b.classList.add('selected');if(row.id==='size-row')state.teamSize=Number(b.dataset.value);if(row.id==='team-row')state.settings.team=b.dataset.value;if(row.id==='target-row')state.settings.target=Number(b.dataset.value);if(row.id==='difficulty-row')state.settings.difficulty=b.dataset.value;if(row.id==='loadout-row')state.settings.loadout=b.dataset.value;}));}
+function openSetup(mode){
+  closeRemoteMatch();state.running=false;state.paused=false;state.runId++;clearOperationUi();
+  state.mode=mode;state.teamSize=5;state.roomAction='create';
+  state.settings={team:'blue',target:50,difficulty:'standard',loadout:'balanced'};
+  menu.classList.add('hidden');game.classList.add('hidden');setup.classList.remove('hidden');
+  $('#setup-title').innerHTML=mode==='survival'?'LAB<br><span>ESCAPE.</span>':'TEAM<br><span>DEATHMATCH.</span>';
+  $('#setup-subtitle').textContent=mode==='survival'?'Explore the facility, gather supplies, and reach extraction.':'Choose a team size and take your squad into the arena.';
+  const survivalOptions=`<div class="config-label">FACILITY CONDITIONS</div><div class="choice-row" id="difficulty-row"><button class="choice selected" data-value="standard">STANDARD</button><button class="choice" data-value="survival">HARDCORE</button><button class="choice" data-value="training">TRAINING</button></div><div class="config-label">FIELD KIT</div><div class="choice-row" id="loadout-row"><button class="choice selected" data-value="balanced">BALANCED</button><button class="choice" data-value="assault">ASSAULT</button><button class="choice" data-value="medic">MEDIC</button></div>`;
+  const pvpOptions=`<div class="config-label">TEAM SIZE · AI FILL ${state.botFill?'ON':'OFF'}</div><div class="choice-row" id="size-row"><button class="choice selected" data-value="5">5 VS 5</button><button class="choice" data-value="10">10 VS 10</button></div><div class="config-label">YOUR TEAM</div><div class="choice-row" id="team-row"><button class="choice selected" data-value="blue">BLUE TEAM</button><button class="choice" data-value="red">RED TEAM</button></div><div class="config-label">MATCH TARGET</div><div class="choice-row" id="target-row"><button class="choice selected" data-value="50">FIRST TO 50</button><button class="choice" data-value="100">FIRST TO 100</button><button class="choice" data-value="250">FIRST TO 250</button></div>`;
+  const localRoom=mode==='pvp'&&typeof window!=='undefined'&&['localhost','127.0.0.1'].includes(window.location.hostname);
+  const roomOptions=`<div class="config-label">DEV MATCH ROOM</div><div class="choice-row" id="room-row"><button class="choice selected" data-value="create">CREATE ROOM</button><button class="choice" data-value="join">JOIN WITH CODE</button></div><label class="config-label room-code-label hidden" for="room-code-input">ROOM CODE</label><input id="room-code-input" class="room-code-input hidden" maxlength="6" autocomplete="off" spellcheck="false" placeholder="ENTER 6-CHARACTER CODE"><p class="room-help">Rooms on this local preview are available only to browsers that can reach this computer.</p>`;
+  $('#setup-options').innerHTML=mode==='survival'?survivalOptions:pvpOptions+(localRoom?roomOptions:'');
+  $('#start-button').innerHTML=`${mode==='survival'?'BEGIN OPERATION':localRoom?'CREATE ROOM':'ENTER ARENA'} <span>→</span>`;
+  setup.querySelectorAll('.choice-row').forEach(row=>row.addEventListener('click',e=>{
+    const button=e.target.closest('.choice');if(!button)return;
+    row.querySelectorAll('.choice').forEach(choice=>choice.classList.remove('selected'));
+    button.classList.add('selected');
+    if(row.id==='size-row')state.teamSize=Number(button.dataset.value);
+    if(row.id==='team-row')state.settings.team=button.dataset.value;
+    if(row.id==='target-row')state.settings.target=Number(button.dataset.value);
+    if(row.id==='difficulty-row')state.settings.difficulty=button.dataset.value;
+    if(row.id==='loadout-row')state.settings.loadout=button.dataset.value;
+    if(row.id==='room-row'){
+      state.roomAction=button.dataset.value;
+      const joining=state.roomAction==='join';
+      $('#room-code-input').classList.toggle('hidden',!joining);
+      $('.room-code-label').classList.toggle('hidden',!joining);
+      $('#start-button').innerHTML=`${joining?'JOIN ROOM':'CREATE ROOM'} <span>→</span>`;
+    }
+  }));
+}
 function floorTile(x,y){return state.world.map[y]?.[x]===0;}
 function generateWorld(mode,seed=Math.floor(Math.random()*0x100000000)){
   const generated=createFacility(mode,seed);
@@ -154,43 +189,90 @@ function startLocalGame(seed){clearOperationUi();state.runId++;setup.classList.a
   if(state.mode==='survival'){state.player.x=state.world.spawnZones[0].x;state.player.y=state.world.spawnZones[0].y;state.player.invuln=2.5;if(state.settings.difficulty==='training'){state.player.hp=state.player.maxHp=150;state.player.armor=20;}else if(state.settings.difficulty==='survival'){state.player.hp=state.player.maxHp=80;}spawnLoot(46);spawnEnemy('guard',state.world.rooms[0]);const threatTotal=state.settings.difficulty==='training'?2:state.settings.difficulty==='survival'?5:3;for(let i=0;i<threatTotal;i++)spawnEnemy('monster');seedRoomThreats();$('#mode-label').textContent='LAB ESCAPE';$('#objective-label').textContent='REACH EXTRACTION';$('#objective-detail').textContent='Explore the lab';$('#objective-detail').classList.remove('blue-text');$('#score-panel').classList.add('hidden');$('#map-status').textContent='— EXPLORE';log('You entered Facility 07-C. Find a way out.','good');log('Supplies are marked by their silhouettes. Press E to collect.','good');}
   else {spawnLoot(40);const playerColor=state.settings.team==='blue'?'blue':'red',enemyColor=playerColor==='blue'?'red':'blue';state.player.team=playerColor;state.player.x=state.world.spawnZones[playerColor==='blue'?0:1].x;state.player.y=state.world.spawnZones[playerColor==='blue'?0:1].y;for(let i=0;i<state.teamSize-1;i++)spawnBot(playerColor,i);for(let i=0;i<state.teamSize;i++)spawnBot(enemyColor,i);$('#mode-label').textContent=`TEAM DEATHMATCH · ${state.teamSize}V${state.teamSize}`;$('#objective-label').textContent=`FIRST TEAM TO ${state.settings.target} WINS`;$('#objective-detail').textContent=`Win ${state.settings.target} eliminations`;$('#score-target').textContent=`FIRST TO ${state.settings.target}`;$('#score-panel').classList.remove('hidden');$('#teams-line').textContent=`${state.teamSize}V${state.teamSize} · BOTS ACTIVE`;$('#map-status').textContent='— TEAM VISION';log(`${state.teamSize}v${state.teamSize} match active. AI squads deployed.`,'good');log('Collect gear, then fight for your team.');}
   $('#threat-count').textContent=state.mode==='survival'?String(state.enemies.filter(e=>e.alive&&e.type==='monster').length):String(state.bots.length+1);$('#kill-count').textContent='0';$('#loot-count').textContent='0';$('#grenade-count').textContent=String(inventoryGrenades());$('#blue-score').textContent='0';$('#red-score').textContent='0';$('#health-value').textContent=String(state.player.hp);$('#health-bar').style.width='100%';$('#armor-value').textContent=`+ ${state.player.armor} ARM`;$('#armor-bar').style.width=`${state.player.armor}%`;renderWeapons();$('#event-log').innerHTML='';updateHUD();state.running=true;state.paused=false;state.lastTime=performance.now();resizeCanvas();const runId=state.runId;requestAnimationFrame(now=>frame(now,runId));}
-function connectDevMatch(url){return new Promise((resolve,reject)=>{
-  const socket=new WebSocket(url),timeout=setTimeout(()=>{socket.close();reject(new Error('Match connection timed out'));},4000);
-  let welcome=null,snapshot=null,settled=false;
-  const fail=()=>{if(settled)return;settled=true;clearTimeout(timeout);reject(new Error('Match connection failed'));};
-  socket.onerror=fail;socket.onclose=fail;
+function connectRoom(url){return new Promise((resolve,reject)=>{
+  const socket=new WebSocket(url);
+  const timeout=setTimeout(()=>{socket.close();fail('Room connection timed out');},5000);
+  let welcome=null,lobby=null,settled=false;
+  const fail=message=>{if(settled)return;settled=true;clearTimeout(timeout);reject(new Error(message));};
+  socket.onerror=()=>fail('Room connection failed');
+  socket.onclose=event=>fail(event.reason||'Room connection closed');
   socket.onmessage=event=>{
     let message;try{message=JSON.parse(event.data);}catch{return;}
     if(message.type==='welcome')welcome=message;
-    if(message.type==='snapshot')snapshot=message;
-    if(welcome&&snapshot&&!settled){settled=true;clearTimeout(timeout);resolve({socket,welcome,snapshot});}
+    if(message.type==='lobby')lobby=message;
+    if(welcome&&lobby&&!settled){settled=true;clearTimeout(timeout);resolve({socket,welcome,lobby});}
   };
 });}
+function renderRoomLobby(){
+  const room=state.lobby;if(!room)return;
+  const data=room.state,self=data.players.find(player=>player.id===room.welcome.id),isHost=data.hostId===room.welcome.id;
+  const blue=data.players.filter(player=>player.team==='blue'),red=data.players.filter(player=>player.team==='red');
+  const rows=(players,team)=>players.map(player=>`<div class="room-player"><span class="${team}-text">${team.toUpperCase()} ${player.id===room.welcome.id?'· YOU':''}${player.id===data.hostId?' · HOST':''}</span><b>${player.ready?'READY':'WAITING'}</b></div>`).join('');
+  $('#setup-title').innerHTML='MATCH<br><span>LOBBY.</span>';
+  $('#setup-subtitle').textContent=`Room ${data.code} · ${data.teamSize}v${data.teamSize} · first to ${data.target}. Share the code with someone using this local preview.`;
+  $('#setup-options').innerHTML=`<div class="config-label">ROOM CODE</div><div class="room-code-display" aria-label="Room code">${data.code}</div><div class="config-label">PLAYERS · BOTS FILL EMPTY SPOTS</div><div class="room-player-list">${rows(blue,'blue')}${rows(red,'red')}</div><button id="room-ready-button" class="choice room-ready-button ${self?.ready?'selected':''}" type="button">${self?.ready?'READY ✓':'READY UP'}</button><p class="room-help" id="room-lobby-message">${isHost?'When everyone is ready, start the match.':'Waiting for the host to start the match.'}</p>`;
+  $('#room-ready-button').addEventListener('click',()=>room.socket.send(JSON.stringify({type:'lobby',action:'ready',ready:!self?.ready})));
+  const canStart=isHost&&data.players.length>0&&data.players.every(player=>player.ready);
+  const startButton=$('#start-button');
+  startButton.disabled=!canStart;
+  startButton.innerHTML=`${isHost?'START MATCH':'WAITING FOR HOST'} <span>→</span>`;
+}
+function startRoomMatch(snapshot){
+  const room=state.lobby;if(!room)return;
+  const {socket,welcome}=room;
+  state.lobby=null;
+  state.settings.team=welcome.team;
+  state.teamSize=welcome.teamSize;
+  state.settings.target=welcome.target;
+  startLocalGame(welcome.seed);
+  state.remote={socket,id:welcome.id,nextInputAt:0,actions:{}};
+  applyRemoteSnapshot(snapshot);
+  $('#mode-label').textContent=`DEV MATCH · ${state.teamSize}V${state.teamSize}`;
+  $('#teams-line').textContent=`ROOM ${welcome.code} · SERVER MATCH`;
+  log(`Room ${welcome.code} is live.`, 'good');
+}
 async function startGame(){
+  if(state.lobby){state.lobby.socket.send(JSON.stringify({type:'lobby',action:'start'}));return;}
   if(state.mode!=='pvp'||!['localhost','127.0.0.1'].includes(window.location.hostname)){startLocalGame();return;}
   const runId=state.runId,button=$('#start-button'),original=button.innerHTML;
-  button.disabled=true;button.textContent='CONNECTING TO DEV MATCH…';
+  button.disabled=true;button.textContent=state.roomAction==='join'?'JOINING ROOM…':'CREATING ROOM…';
   try{
-    const response=await fetch('./devmatch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({teamSize:state.teamSize,target:state.settings.target})});
-    if(!response.ok)throw new Error('Development match server unavailable');
-    const config=await response.json();
+    let code;
+    if(state.roomAction==='create'){
+      const response=await fetch('./rooms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({teamSize:state.teamSize,target:state.settings.target})});
+      const result=await response.json();
+      if(!response.ok)throw new Error(result.error||'Could not create room');
+      code=result.code;
+    }else{
+      code=$('#room-code-input').value.trim().toUpperCase();
+      if(!/^[A-Z2-9]{6}$/.test(code))throw new Error('Enter a six-character room code.');
+      const response=await fetch(`./rooms/${code}`);
+      if(!response.ok)throw new Error('Room not found or already started.');
+    }
     if(runId!==state.runId)return;
-    const connection=await connectDevMatch(`${config.url}?team=${state.settings.team}`);
+    const protocol=window.location.protocol==='https:'?'wss:':'ws:';
+    const connection=await connectRoom(`${protocol}//${window.location.host}/rooms/${code}?team=${state.settings.team}`);
     if(runId!==state.runId){connection.socket.close();return;}
-    state.settings.team=connection.welcome.team;
-    state.teamSize=connection.welcome.teamSize;
-    state.settings.target=connection.welcome.target;
-    startLocalGame(connection.welcome.seed);
-    state.remote={socket:connection.socket,id:connection.welcome.id,nextInputAt:0,actions:{}};
-    connection.socket.onmessage=event=>{try{const message=JSON.parse(event.data);if(message.type==='snapshot'&&state.remote?.socket===connection.socket)applyRemoteSnapshot(message);}catch{}};
-    connection.socket.onclose=()=>{if(state.remote?.socket===connection.socket&&state.running)finish(false,'CONNECTION LOST','The development match server disconnected.');};
-    applyRemoteSnapshot(connection.snapshot);
-    $('#mode-label').textContent=`DEV MATCH · ${state.teamSize}V${state.teamSize}`;
-    $('#teams-line').textContent=`${state.teamSize}V${state.teamSize} · SERVER MATCH`;
-    log('Connected to the local match server.','good');
-  }catch{
-    if(runId===state.runId){startLocalGame();announce('SERVER UNAVAILABLE · LOCAL BOT MATCH');}
-  }finally{button.disabled=false;button.innerHTML=original;}
+    state.lobby={...connection,state:connection.lobby};
+    connection.socket.onmessage=event=>{
+      let message;try{message=JSON.parse(event.data);}catch{return;}
+      if(message.type==='lobby'){if(state.lobby?.socket===connection.socket){state.lobby.state=message;renderRoomLobby();}}
+      else if(message.type==='lobby-error')$('#room-lobby-message').textContent=message.message;
+      else if(message.type==='snapshot'){
+        if(state.lobby?.socket===connection.socket)startRoomMatch(message);
+        else if(state.remote?.socket===connection.socket)applyRemoteSnapshot(message);
+      }
+    };
+    connection.socket.onclose=()=>{
+      if(state.lobby?.socket===connection.socket){openSetup('pvp');$('#setup-subtitle').textContent='Room connection lost. Create or join a room again.';}
+      else if(state.remote?.socket===connection.socket&&state.running)finish(false,'CONNECTION LOST','The room server disconnected.');
+    };
+    renderRoomLobby();
+  }catch(error){
+    if(runId===state.runId)$('#setup-subtitle').textContent=error.message;
+  }finally{
+    if(runId===state.runId&&!state.lobby){button.disabled=false;button.innerHTML=original;}
+  }
 }
 function applyRemoteSnapshot(snapshot){
   if(!state.remote||snapshot.seed!==state.world.seed)return;

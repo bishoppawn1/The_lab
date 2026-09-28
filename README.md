@@ -34,7 +34,7 @@ npm ci
 npm run dev
 ```
 
-Open [http://127.0.0.1:5174](http://127.0.0.1:5174). Entering a deathmatch in this preview automatically starts the authoritative server and connects your browser. A second local tab can join the same match by selecting its team and entering the arena; when everyone leaves, the next match starts fresh. You do not need to run `npm run match-server` separately. Lab Escape remains local. To create the GitHub Pages build:
+Open [http://127.0.0.1:5174](http://127.0.0.1:5174). In Team Deathmatch, create a room, choose a team, and share its six-character code with another browser that can reach this preview. Other players select **Join with code** and their team. Everyone marks themselves ready; the host starts the match, and bots fill empty spots. Multiple rooms can wait or play independently. The room server is built into the local preview, so you do not need a second npm command. Lab Escape remains local. To create the GitHub Pages build:
 
 ```sh
 npm run build
@@ -44,15 +44,15 @@ The build writes a static copy to `dist/` and adds cache-busting versions to loc
 
 ## Local Dev Match server
 
-The server owns the local Dev Match's generated map, players, bots, doors, pickups, bullets, grenades, damage, respawns, and score. It simulates at 30 ticks per second and sends team-filtered snapshots over WebSocket. The browser sends movement, aim, fire, reload, interact, grenade use, and slot selection; it cannot submit a successful hit or pickup. The local preview starts the server only when someone enters a deathmatch. Room codes and public server hosting still come later; the GitHub Pages game keeps its bot-only match.
+The server owns each local Dev Match's generated map, players, bots, doors, pickups, bullets, grenades, damage, respawns, and score. It simulates at 30 ticks per second and sends team-filtered snapshots over WebSocket. The browser sends movement, aim, fire, reload, interact, grenade use, and slot selection; it cannot submit a successful hit or pickup. Rooms use six-character codes, separate lobbies, ready states, and a host-controlled start. The first player is host; if they leave before the match, hosting passes to another player. Empty rooms are removed. Public server hosting still comes later; the GitHub Pages game keeps its bot-only match.
 
-For protocol testing, you can still run the standalone match server:
+The standalone room service can be run for protocol testing or future deployment:
 
 ```sh
-npm run match-server
+npm run room-server
 ```
 
-It listens at `ws://127.0.0.1:8787/match` and exposes `http://127.0.0.1:8787/health`. Set `MATCH_HOST` and `MATCH_PORT` when hosting it separately from GitHub Pages. On connection, the server sends a `welcome` message with the player ID, team, map seed, team size, score target, and tick rate, followed by `snapshot` messages. Send control messages in this shape:
+It listens at `http://127.0.0.1:8787`. Set `MATCH_HOST` and `MATCH_PORT` to change its bind address and port. `POST /rooms` with `{"teamSize":5,"target":50}` creates a room; `GET /rooms/CODE` checks one; WebSocket `/rooms/CODE?team=blue` joins it. The first player becomes host. Clients send `{"type":"lobby","action":"ready","ready":true}` and the host sends `{"type":"lobby","action":"start"}` after all players are ready. The server then sends `started` and team-filtered `snapshot` messages. During play, send control messages in this shape:
 
 ```json
 {"type":"input","moveX":1,"moveY":0,"aim":0,"fire":true,"reload":false,"interact":false,"grenade":false,"slot":0}
@@ -68,11 +68,12 @@ Movement axes are clamped to −1 through 1; `aim` is in radians; `slot` is 0–
 - `src/arena-core.js` — shared weapon and loot data, inventory, bot decisions and pathfinding, movement, doors, vision, damage, projectiles, and scoring
 - `src/authoritative-match.js` — browser-independent match owner and fixed-step simulation
 - `src/app.js` — local and server-driven match orchestration, browser input, sound, UI, and rendering; it uses the shared modules above
-- `scripts/server.js` — local preview that starts a Dev Match server on demand
-- `scripts/match-server.js` — WebSocket process for one authoritative match
+- `scripts/server.js` — local preview that serves the game and room API on one port
+- `scripts/room-server.js` — coded rooms, lobby state, and isolated authoritative matches over HTTP and WebSocket
+- `scripts/match-server.js` — original single-match WebSocket protocol test server
 - `test/arena-core.test.js` — runs shared map and arena rules directly in Node, without a browser
 - `test/authoritative-match.test.js` — verifies server ownership, controls, snapshots, and WebSocket transport
-- `test/devmatch-preview.test.js` — verifies automatic local server startup and fresh matches
+- `test/devmatch-preview.test.js` — verifies room creation, joining, readiness, host transfer, and match start
 - `scripts/build.js` — static Pages build
 - `.github/workflows/pages.yml` — GitHub Pages deployment workflow
 

@@ -10,7 +10,7 @@ function loadGameLogic(random) {
   const element = { getContext: () => ({}), classList: { add() {}, remove() {} }, appendChild() {}, addEventListener() {}, setAttribute() {}, dataset: {}, style: {} };
   const context = { document: { querySelector: () => element, createElement: () => ({ ...element, dataset: {} }) }, performance: { now: () => 1000 } };
   if (random) context.Math = Object.assign(Object.create(Math), { random });
-  vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, WEAPONS, generateWorld, spawnLoot, takeLoot, respawnLoot, spawnAmbientLoot, updateLootSpawns, buildPlayer, dropPlayerLoadout, respawnPlayer, spawnBot, respawnBot, blocked, lineClear, interact, setDoorOpen, updateVision, seedRoomThreats, spawnEnemy, firingLaneClear, updateBot, updateEnemy, botCanTakeLoot, botPickupLoot, hit, shoot, advanceBullet };`, context);
+  vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, WEAPONS, generateWorld, spawnLoot, takeLoot, respawnLoot, spawnAmbientLoot, updateLootSpawns, buildPlayer, dropPlayerLoadout, respawnPlayer, spawnBot, respawnBot, blocked, lineClear, interact, setDoorOpen, updateVision, seedRoomThreats, spawnEnemy, firingLaneClear, botCanSeeTarget, updateBot, updateEnemy, botCanTakeLoot, botPickupLoot, unitVisibleToTeam, hit, shoot, advanceBullet };`, context);
   return context.lab;
 }
 
@@ -345,7 +345,7 @@ test('opening another operation after a result hides the old game and result', (
   assert.equal(state.mode, 'pvp');
 });
 
-test('opposing bots move around a close corner instead of stopping at the wall', () => {
+test('bots do not track opponents through a corner and patrol instead', () => {
   const { state, firingLaneClear, updateBot } = loadGameLogic();
   const map = Array.from({ length: 9 }, () => Array(9).fill(1));
   for (let y = 1; y <= 5; y++) map[y][2] = 0;
@@ -364,21 +364,17 @@ test('opposing bots move around a close corner instead of stopping at the wall',
   assert.ok(Math.hypot(blue.x - red.x, blue.y - red.y) < 145);
   updateBot(blue, 0.016, 1000);
   updateBot(red, 0.016, 1000);
+  assert.equal(blue.target, null);
+  assert.equal(red.target, null);
   assert.equal(state.bullets.length, 0, 'bots should hold fire while the wall blocks the shot');
+  assert.ok(blue.patrolTarget);
   blue.fireTime = red.fireTime = Infinity;
+  const start = { x: blue.x, y: blue.y };
   for (let frame = 1; frame < 25; frame++) {
     updateBot(blue, 0.016, frame * 16);
     updateBot(red, 0.016, frame * 16);
   }
-  assert.ok(blue.y > 112 + 10, 'blue should follow its route toward the corner');
-  assert.ok(red.x < 144 - 10, 'red should follow its route toward the corner');
-  let gainedFiringLane = false;
-  for (let frame = 25; frame < 190; frame++) {
-    updateBot(blue, 0.016, frame * 16);
-    updateBot(red, 0.016, frame * 16);
-    if (firingLaneClear(blue, red)) { gainedFiringLane = true; break; }
-  }
-  assert.ok(gainedFiringLane, 'bots should round the corner and gain a firing lane');
+  assert.ok(Math.hypot(blue.x - start.x, blue.y - start.y) > 3, 'blue should keep moving on a patrol route');
 });
 
 test('bots prefer an exposed opponent over a closer one behind a corner', () => {
@@ -433,13 +429,94 @@ test('bots retarget the opponent shooting at or hitting them', () => {
   assert.equal(blue.target, attacker);
 });
 
+test('bots ignore hidden allies and switch to a visible attacker', () => {
+  const { state, updateBot, botCanSeeTarget } = loadGameLogic();
+  const map = Array.from({ length: 14 }, (_, y) => Array.from({ length: 20 }, (_, x) => x === 0 || y === 0 || x === 19 || y === 13 ? 1 : 0));
+  for (let y = 2; y <= 10; y++) map[y][9] = 1;
+  state.world = { w: 20, h: 14, tile: 32, map };
+  state.mode = 'pvp';
+  state.elapsed = 1;
+  state.loot = [];
+  const red = { x: 7.5 * 32, y: 5.5 * 32, r: 10, speed: 0, team: 'red', alive: true, inventory: [0, null, null, null], active: 0, ammo: {}, think: 0, fireTime: Infinity };
+  const hiddenAlly = { ...red, x: 11.5 * 32, team: 'blue', think: 0 };
+  const player = { x: 7.5 * 32, y: 9.5 * 32, r: 11, team: 'blue', alive: false };
+  state.bots = [red, hiddenAlly];
+  state.player = player;
+  assert.equal(botCanSeeTarget(red, hiddenAlly), false);
+  updateBot(red, .016, 1000);
+  assert.equal(red.target, null, 'hidden teammate positions must not be known to the enemy');
+
+  player.alive = true;
+  red.target = hiddenAlly;
+  red.recentAttacker = player;
+  red.attackedAt = state.elapsed;
+  red.think = 0;
+  updateBot(red, .016, 1016);
+  assert.equal(red.target, player, 'a visible attacker should replace an unreachable target');
+});
+
+test('player and bot sight ranges agree, and unseen units stay hidden', () => {
+  const { state, updateBot, updateVision, unitVisibleToTeam } = loadGameLogic();
+  const map = Array.from({ length: 15 }, (_, y) => Array.from({ length: 25 }, (_, x) => x === 0 || y === 0 || x === 24 || y === 14 ? 1 : 0));
+  state.world = { w: 25, h: 15, tile: 32, map, visible: new Set(), explored: new Set(), visionAt: 0 };
+  state.mode = 'pvp';
+  state.loot = [];
+  state.player = { x: 5.5 * 32, y: 5.5 * 32, r: 11, team: 'blue', alive: true };
+  const bot = { x: 16.5 * 32, y: 5.5 * 32, r: 10, speed: 0, team: 'red', alive: true, inventory: [0, null, null, null], active: 0, ammo: {}, think: 0, fireTime: Infinity };
+  state.bots = [bot];
+  updateVision(1000);
+  assert.equal(unitVisibleToTeam(bot), true);
+  updateBot(bot, .016, 1000);
+  assert.equal(bot.target, state.player);
+
+  bot.x = 19.5 * 32;
+  bot.think = 0;
+  updateVision(1200);
+  assert.equal(unitVisibleToTeam(bot), true);
+  updateBot(bot, .016, 1200);
+  assert.equal(bot.target, state.player);
+
+  bot.x = 20.5 * 32;
+  bot.think = 0;
+  updateVision(1400);
+  assert.equal(unitVisibleToTeam(bot), false);
+  updateBot(bot, .016, 1400);
+  assert.equal(bot.target, null);
+
+  bot.x = 16.5 * 32;
+  map[5][10] = 1;
+  bot.think = 0;
+  updateVision(1600);
+  assert.equal(unitVisibleToTeam(bot), false);
+  updateBot(bot, .016, 1600);
+  assert.equal(bot.target, null);
+});
+
+test('survival monsters only acquire a friendly guard through clear sight', () => {
+  const { state, updateEnemy } = loadGameLogic();
+  const map = Array.from({ length: 9 }, (_, y) => Array.from({ length: 13 }, (_, x) => x === 0 || y === 0 || x === 12 || y === 8 ? 1 : 0));
+  for (let y = 1; y <= 7; y++) map[y][6] = 1;
+  state.world = { w: 13, h: 9, tile: 32, map };
+  state.mode = 'survival';
+  state.player = { x: 2.5 * 32, y: 2.5 * 32, team: 'blue', alive: false };
+  const monster = { x: 4.5 * 32, y: 4.5 * 32, r: 9, speed: 0, type: 'monster', variant: 'crawler', alive: true, think: 0, fireTime: Infinity, invuln: 0, hitFlash: 0 };
+  const guard = { x: 8.5 * 32, y: 4.5 * 32, r: 10, speed: 0, type: 'guard', team: 'blue', alive: true, think: 0, fireTime: Infinity, invuln: 0, hitFlash: 0 };
+  state.enemies = [monster, guard];
+  updateEnemy(monster, .016, 1000);
+  assert.equal(monster.target, null);
+  map[4][6] = 0;
+  monster.think = 0;
+  updateEnemy(monster, .016, 1016);
+  assert.equal(monster.target, guard);
+});
+
 test('hostile bots and monsters acquire the player only within sight range and without walls', () => {
   const { state, updateBot, updateEnemy } = loadGameLogic();
   const map = Array.from({ length: 18 }, (_, y) => Array.from({ length: 25 }, (_, x) => x === 0 || y === 0 || x === 24 || y === 17 ? 1 : 0));
   state.world = { w: 25, h: 18, tile: 32, map };
   state.mode = 'pvp';
   state.loot = [];
-  state.player = { x: 19.5 * 32, y: 5.5 * 32, r: 11, team: 'blue', alive: true };
+  state.player = { x: 20.5 * 32, y: 5.5 * 32, r: 11, team: 'blue', alive: true };
   const bot = { x: 5.5 * 32, y: 5.5 * 32, r: 10, speed: 0, team: 'red', alive: true, inventory: [0, null, null, null], active: 0, ammo: {}, think: 0, fireTime: Infinity, invuln: 0, hitFlash: 0 };
   state.bots = [bot];
   updateBot(bot, 0.016, 1000);

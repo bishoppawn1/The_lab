@@ -52,32 +52,61 @@ function clearOperationUi(){for(const id of ['pause-overlay','end-overlay','roun
 function showMenu(){state.running=false;state.paused=false;state.runId++;clearOperationUi();menu.classList.remove('hidden');setup.classList.add('hidden');game.classList.add('hidden');}
 function openSetup(mode){state.running=false;state.paused=false;state.runId++;clearOperationUi();state.mode=mode;state.teamSize=5;state.settings={team:'blue',target:50,difficulty:'standard',loadout:'balanced'};menu.classList.add('hidden');game.classList.add('hidden');setup.classList.remove('hidden');$('#setup-title').innerHTML=mode==='survival'?'LAB<br><span>ESCAPE.</span>':'TEAM<br><span>DEATHMATCH.</span>';$('#setup-subtitle').textContent=mode==='survival'?'Explore the facility, gather supplies, and reach extraction.':'Choose a team size and take your squad into the arena.';$('#setup-options').innerHTML=mode==='survival'?`<div class="config-label">FACILITY CONDITIONS</div><div class="choice-row" id="difficulty-row"><button class="choice selected" data-value="standard">STANDARD</button><button class="choice" data-value="survival">HARDCORE</button><button class="choice" data-value="training">TRAINING</button></div><div class="config-label">FIELD KIT</div><div class="choice-row" id="loadout-row"><button class="choice selected" data-value="balanced">BALANCED</button><button class="choice" data-value="assault">ASSAULT</button><button class="choice" data-value="medic">MEDIC</button></div>`:`<div class="config-label">TEAM SIZE · AI FILL ${state.botFill?'ON':'OFF'}</div><div class="choice-row" id="size-row"><button class="choice selected" data-value="5">5 VS 5</button><button class="choice" data-value="10">10 VS 10</button></div><div class="config-label">YOUR TEAM</div><div class="choice-row" id="team-row"><button class="choice selected" data-value="blue">BLUE TEAM</button><button class="choice" data-value="red">RED TEAM</button></div><div class="config-label">MATCH TARGET</div><div class="choice-row" id="target-row"><button class="choice selected" data-value="50">FIRST TO 50</button><button class="choice" data-value="100">FIRST TO 100</button><button class="choice" data-value="250">FIRST TO 250</button></div>`;$('#start-button').innerHTML=`${mode==='survival'?'BEGIN OPERATION':'ENTER ARENA'} <span>→</span>`;setup.querySelectorAll('.choice-row').forEach(row=>row.addEventListener('click',e=>{const b=e.target.closest('.choice');if(!b)return;row.querySelectorAll('.choice').forEach(x=>x.classList.remove('selected'));b.classList.add('selected');if(row.id==='size-row')state.teamSize=Number(b.dataset.value);if(row.id==='team-row')state.settings.team=b.dataset.value;if(row.id==='target-row')state.settings.target=Number(b.dataset.value);if(row.id==='difficulty-row')state.settings.difficulty=b.dataset.value;if(row.id==='loadout-row')state.settings.loadout=b.dataset.value;}));}
 function floorTile(x,y){return state.world.map[y]?.[x]===0;}
+function partitionFacility(w,h,carve,roomCount){
+  const gap=3,minSize=22,sections=[{x:6,y:6,w:w-12,h:h-12}],segments=[];
+  const capacity=section=>Math.floor((section.w+gap)/(minSize+gap))*Math.floor((section.h+gap)/(minSize+gap));
+  // A perimeter hall joins every split, so even deeply nested sections stay connected.
+  carve(3,3,w-4,5);carve(3,h-6,w-4,h-4);
+  carve(3,3,5,h-4);carve(w-6,3,w-4,h-4);
+  while(sections.length<roomCount){
+    const totalCapacity=sections.reduce((sum,section)=>sum+capacity(section),0),options=[];
+    for(const section of sections)for(const vertical of [true,false]){
+      const size=vertical?section.w:section.h;
+      for(let cut=minSize;cut<=size-minSize-gap;cut++){
+        const first={...section,[vertical?'w':'h']:cut};
+        const second=vertical?{...section,x:section.x+cut+gap,w:section.w-cut-gap}:{...section,y:section.y+cut+gap,h:section.h-cut-gap};
+        // Keep enough usable space for every themed room, even with extreme random rolls.
+        if(totalCapacity-capacity(section)+capacity(first)+capacity(second)>=roomCount)options.push({section,vertical,cut,first,second});
+      }
+    }
+    const {section,vertical,cut,first,second}=choice(options);
+    const hall=vertical?{x1:section.x+cut,y1:section.y-gap,x2:section.x+cut+gap-1,y2:section.y+section.h+gap-1}:{x1:section.x-gap,y1:section.y+cut,x2:section.x+section.w+gap-1,y2:section.y+cut+gap-1};
+    carve(hall.x1,hall.y1,hall.x2,hall.y2);segments.push(hall);
+    sections.splice(sections.indexOf(section),1,first,second);
+  }
+  return{sections,corridors:{segments}};
+}
 function generateWorld(mode){
   const w=160,h=116,map=Array.from({length:h},()=>Array(w).fill(1));
   const carve=(x1,y1,x2,y2)=>{for(let y=y1;y<=y2;y++)for(let x=x1;x<=x2;x++)if(x>0&&y>0&&x<w-1&&y<h-1)map[y][x]=0;};
   const names=['WORKSHOP','ARMORY','RESEARCH LAB','SPECIMEN HOLD','MEDICAL','STORAGE','NEST CHAMBER','CONTROL ROOM','SERVER ROOM','POWER STATION','OBSERVATION','CHEMISTRY','MAINTENANCE','ARCHIVES','QUARANTINE','GENERATOR'];
   for(let i=names.length-1;i>0;i--){const j=Math.floor(rand(0,i+1));[names[i],names[j]]=[names[j],names[i]];}
-  const corridors={horizontal:[34,82],vertical:[26,76,126]};
-  for(const y of corridors.horizontal)carve(7,y-1,w-8,y+1);
-  for(const x of corridors.vertical)carve(x,34,x+2,82);
-  const columns=[14,39,64,89,114,139],rows=[15,58,101],rooms=[],doors=[];
-  for(let row=0;row<3;row++)for(let col=0;col<6;col++){
-    const index=row*6+col,rw=Math.floor(rand(11,17)),rh=Math.floor(rand(11,16));
-    const cx=columns[col]+Math.floor(rand(-2,3)),cy=rows[row]+Math.floor(rand(-2,3));
-    const room={x:Math.floor(cx-rw/2),y:Math.floor(cy-rh/2),w:rw,h:rh,name:index===0?'ENTRY BAY':index===17?'EXTRACTION BAY':names[index-1]};
-    rooms.push(room);carve(room.x+1,room.y+1,room.x+rw-2,room.y+rh-2);
-    const doorX=room.x+Math.floor(rand(3,room.w-4)),south=row===0||row===1&&Math.random()<.5;
-    const boundaryY=south?room.y+room.h-1:room.y,corridorY=row===0?corridors.horizontal[0]:row===2?corridors.horizontal[1]:south?corridors.horizontal[1]:corridors.horizontal[0];
+  const {sections,corridors}=partitionFacility(w,h,carve,names.length+2),doors=[];
+  const roomSections=new Map(),center=room=>({x:(room.x+Math.floor(room.w/2)+.5)*32,y:(room.y+Math.floor(room.h/2)+.5)*32});
+  const rooms=sections.map(section=>{
+    const rw=Math.floor(rand(11,Math.min(21,section.w-4)+1)),rh=Math.floor(rand(11,Math.min(19,section.h-4)+1));
+    const room={x:Math.floor(rand(section.x+2,section.x+section.w-rw-1)),y:Math.floor(rand(section.y+2,section.y+section.h-rh-1)),w:rw,h:rh};
+    roomSections.set(room,section);return room;
+  });
+  // Vary both starting sides while keeping entry and extraction well separated.
+  const pairs=[];for(let i=0;i<rooms.length;i++)for(let j=i+1;j<rooms.length;j++)pairs.push({a:rooms[i],b:rooms[j],distance:dist(center(rooms[i]),center(rooms[j]))});
+  const longest=Math.max(...pairs.map(pair=>pair.distance)),pair=choice(pairs.filter(pair=>pair.distance>=longest*.85));
+  const [entry,extraction]=Math.random()<.5?[pair.a,pair.b]:[pair.b,pair.a];
+  rooms.splice(0,rooms.length,entry,...rooms.filter(room=>room!==entry&&room!==extraction),extraction);
+  rooms.forEach((room,index)=>{
+    room.name=index===0?'ENTRY BAY':index===rooms.length-1?'EXTRACTION BAY':names[index-1];
+    carve(room.x+1,room.y+1,room.x+room.w-2,room.y+room.h-2);
+    const section=roomSections.get(room),doorX=room.x+Math.floor(rand(3,room.w-4)),south=Math.random()<.5;
+    const boundaryY=south?room.y+room.h-1:room.y,corridorY=south?section.y+section.h+1:section.y-2;
     carve(doorX,Math.min(boundaryY,corridorY),doorX+1,Math.max(boundaryY,corridorY));
     doors.push({x:doorX,y:boundaryY,cx:(doorX+1)*32,cy:(boundaryY+.5)*32,room,open:index===0,approach:{x:(doorX+1)*32,y:(boundaryY+(south?1.5:-.5))*32}});
-  }
+  });
   for(const room of rooms)if(Math.random()<.68){for(let attempt=0;attempt<8;attempt++){
     const x=Math.floor(rand(room.x+3,room.x+room.w-4)),y=Math.floor(rand(room.y+3,room.y+room.h-4));
     if(Math.hypot(x-(room.x+room.w/2),y-(room.y+room.h/2))<4)continue;
     for(let oy=0;oy<2;oy++)for(let ox=0;ox<2;ox++)map[y+oy][x+ox]=1;break;
   }}
-  const center=room=>({x:(room.x+Math.floor(room.w/2)+.5)*32,y:(room.y+Math.floor(room.h/2)+.5)*32});
-  const start=center(rooms[0]),end=center(rooms[17]);
+  const start=center(entry),end=center(extraction);
   const doorTiles=new Map();for(const door of doors)for(let dx=0;dx<2;dx++)doorTiles.set(`${door.x+dx},${door.y}`,door);
   state.world={w,h,map,tile:32,mode,rooms,doors,doorTiles,corridors,exit:{...end,r:39},spawnZones:[start,end],explored:new Set(),visible:new Set(),visionAt:0,labels:rooms.map(room=>({...center(room),text:room.name}))};
   state.decor=[];for(let i=0;i<650;i++){const x=rand(2,w-2),y=rand(2,h-2);if(floorTile(Math.floor(x),Math.floor(y)))state.decor.push({x:(x+.5)*32,y:(y+.5)*32,r:rand(1,4),alpha:rand(.04,.15),kind:Math.random()>.5?'stain':'debris'});}
@@ -340,8 +369,8 @@ function botTargetScore(bot,target){
   return (firing?850:0)+(attacker?(firing?1800:250):0)-dist(bot,target);
 }
 function botPatrolPoint(bot){
-  const corridors=state.world.corridors?.horizontal;
-  if(corridors?.length){const x=Math.floor(rand(state.world.w*.3,state.world.w*.7)),y=choice(corridors);return{x:(x+.5)*32,y:(y+.5)*32};}
+  const segments=state.world.corridors?.segments;
+  if(segments?.length){const hall=choice(segments),x=Math.floor(rand(hall.x1,hall.x2+1)),y=Math.floor(rand(hall.y1,hall.y2+1));return{x:(x+.5)*32,y:(y+.5)*32};}
   return findOpen(bot.x/32,bot.y/32,3,12);
 }
 function weaponUtility(id,d){

@@ -10,11 +10,11 @@ function loadGameLogic(random) {
   const element = { getContext: () => ({}), classList: { add() {}, remove() {} }, appendChild() {}, addEventListener() {}, setAttribute() {}, dataset: {}, style: {} };
   const context = { document: { querySelector: () => element, createElement: () => ({ ...element, dataset: {} }) }, performance: { now: () => 1000 } };
   if (random) context.Math = Object.assign(Object.create(Math), { random });
-  vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, WEAPONS, generateWorld, spawnLoot, takeLoot, respawnLoot, spawnAmbientLoot, updateLootSpawns, buildPlayer, dropPlayerLoadout, respawnPlayer, spawnBot, respawnBot, blocked, lineClear, interact, setDoorOpen, updateVision, seedRoomThreats, spawnEnemy, firingLaneClear, botCanSeeTarget, updateBot, updateEnemy, botCanTakeLoot, botPickupLoot, unitVisibleToTeam, hit, shoot, advanceBullet };`, context);
+  vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, WEAPONS, generateWorld, spawnLoot, takeLoot, respawnLoot, spawnAmbientLoot, updateLootSpawns, buildPlayer, dropPlayerLoadout, respawnPlayer, spawnBot, respawnBot, blocked, lineClear, interact, setDoorOpen, updateVision, seedRoomThreats, spawnEnemy, firingLaneClear, botCanSeeTarget, botPatrolPoint, updateBot, updateEnemy, botCanTakeLoot, botPickupLoot, unitVisibleToTeam, hit, shoot, advanceBullet };`, context);
   return context.lab;
 }
 
-function reachableTiles(world, start) {
+function reachableTiles(world, start, respectDoors = false) {
   const key = (x, y) => `${x},${y}`;
   const queue = [[Math.floor(start.x / 32), Math.floor(start.y / 32)]];
   const seen = new Set([key(...queue[0])]);
@@ -22,7 +22,7 @@ function reachableTiles(world, start) {
     const [x, y] = queue[index];
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const nx = x + dx, ny = y + dy, next = key(nx, ny);
-      if (world.map[ny]?.[nx] !== 0 || seen.has(next)) continue;
+      if (world.map[ny]?.[nx] !== 0 || seen.has(next) || respectDoors && world.doorTiles.get(next)?.open === false) continue;
       seen.add(next);
       queue.push([nx, ny]);
     }
@@ -42,8 +42,10 @@ function roomExits(world, room) {
 }
 
 test('generated rooms remain connected across different layouts', () => {
-  const { state, generateWorld } = loadGameLogic();
-  const layouts = new Set();
+  let seed = 12345;
+  const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+  const { state, generateWorld, botPatrolPoint, blocked } = loadGameLogic(random);
+  const layouts = new Set(), corridorLayouts = new Set(), entryQuadrants = new Set(), exitQuadrants = new Set();
   for (let run = 0; run < 250; run++) {
     const mode = run % 2 ? 'pvp' : 'survival';
     generateWorld(mode);
@@ -54,24 +56,61 @@ test('generated rooms remain connected across different layouts', () => {
     assert.equal(world.rooms.length, 18);
     assert.equal(world.doors.length, 18);
     assert.equal(world.doors.filter(door => !door.open).length, 17);
-    for (const y of world.corridors.horizontal) {
-      for (let x = 7; x <= world.w - 8; x++) assert.equal(world.map[y][x], 0, `main corridor at ${x},${y} must stay open`);
+    for (const hall of world.corridors.segments) {
+      for (let y = hall.y1; y <= hall.y2; y++) for (let x = hall.x1; x <= hall.x2; x++) {
+        assert.equal(world.map[y][x], 0, `corridor at ${x},${y} must stay open`);
+      }
     }
-    for (const x of world.corridors.vertical) {
-      for (let y = 34; y <= 82; y++) assert.equal(world.map[y][x], 0, `cross-corridor at ${x},${y} must stay open`);
-    }
+    corridorLayouts.add(JSON.stringify(world.corridors.segments));
+    const quadrant = point => `${point.x < world.w * 16},${point.y < world.h * 16}`;
+    entryQuadrants.add(quadrant(world.spawnZones[0]));
+    exitQuadrants.add(quadrant(world.exit));
+    assert.ok(Math.hypot(world.spawnZones[0].x - world.exit.x, world.spawnZones[0].y - world.exit.y) > 88 * 32, 'opposing spawn areas should stay far apart');
+    assert.equal(world.rooms[0].name, 'ENTRY BAY');
+    assert.equal(world.rooms.at(-1).name, 'EXTRACTION BAY');
+    assert.equal(new Set(world.rooms.map(room => room.name)).size, 18, 'every room theme should appear once');
     layouts.add(world.rooms.map(room => `${room.x},${room.y},${room.w},${room.h}`).join('|'));
     const reachable = reachableTiles(world, world.spawnZones[0]);
     for (const room of world.rooms) {
       const x = room.x + Math.floor(room.w / 2);
       const y = room.y + Math.floor(room.h / 2);
       assert.ok(reachable.has(`${x},${y}`), `${room.name} must be reachable`);
-      assert.equal(roomExits(world, room), 1, `${room.name} should branch from a main corridor through one entrance`);
+      assert.equal(roomExits(world, room), 1, `${room.name} should connect through exactly one door`);
     }
-    assert.ok(world.rooms.some(room => roomExits(world, room) === 1), 'each layout should contain a dead-end room');
+    assert.equal(reachable.size, world.map.flat().filter(tile => tile === 0).length, 'every floor tile must be reachable when doors are open');
+    const accessible = reachableTiles(world, world.spawnZones[0], true);
+    for (const door of world.doors) {
+      const outside = `${Math.floor(door.approach.x / 32)},${Math.floor(door.approach.y / 32)}`;
+      assert.ok(accessible.has(outside), 'every door must be approachable without crossing another closed room');
+      const inside = `${door.room.x + Math.floor(door.room.w / 2)},${door.room.y + Math.floor(door.room.h / 2)}`;
+      assert.equal(accessible.has(inside), door.open, 'closed rooms must not have a corridor bypass');
+      assert.equal(blocked(door.approach.x, door.approach.y, 11), false, 'door approaches must fit an operator');
+    }
+    for (let patrol = 0; patrol < 5; patrol++) {
+      const point = botPatrolPoint(world.spawnZones[0]);
+      assert.ok(accessible.has(`${Math.floor(point.x / 32)},${Math.floor(point.y / 32)}`), 'patrol destinations must lie on accessible corridors');
+      assert.equal(blocked(point.x, point.y, 10), false);
+    }
+    assert.ok(world.map[0].every(tile => tile === 1) && world.map.at(-1).every(tile => tile === 1));
+    assert.ok(world.map.every(row => row[0] === 1 && row.at(-1) === 1));
     assert.ok(reachable.has(`${Math.floor(world.exit.x / 32)},${Math.floor(world.exit.y / 32)}`));
   }
-  assert.ok(layouts.size > 1, 'new operations should produce different room layouts');
+  assert.equal(layouts.size, 250, 'every sampled operation should have a different room arrangement');
+  assert.equal(corridorLayouts.size, 250, 'the corridor network itself must change between operations');
+  assert.equal(entryQuadrants.size, 4, 'entry can start in any part of the facility');
+  assert.equal(exitQuadrants.size, 4, 'extraction can appear in any part of the facility');
+});
+
+test('map generation terminates with all rooms reachable even at extreme random rolls', () => {
+  for (const roll of [0, .5, 1 - Number.EPSILON]) {
+    const { state, generateWorld } = loadGameLogic(() => roll);
+    for (const mode of ['survival', 'pvp']) {
+      generateWorld(mode);
+      assert.equal(state.world.rooms.length, 18);
+      const reachable = reachableTiles(state.world, state.world.spawnZones[0]);
+      assert.equal(reachable.size, state.world.map.flat().filter(tile => tile === 0).length);
+    }
+  }
 });
 
 test('collected world loot respawns as a different item in a new location', () => {

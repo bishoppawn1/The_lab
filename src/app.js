@@ -28,6 +28,11 @@ function closeRemoteMatch(){
   state.lobby=null;
   state.remote=null;
 }
+function usesLocalRooms(){
+  if(typeof window==='undefined')return false;
+  const {hostname,protocol}=window.location;
+  return protocol==='http:'&&(/^(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)$/.test(hostname)||hostname.endsWith('.local'));
+}
 function showMenu(){closeRemoteMatch();state.running=false;state.paused=false;state.runId++;clearOperationUi();menu.classList.remove('hidden');setup.classList.add('hidden');game.classList.add('hidden');}
 function openSetup(mode){
   closeRemoteMatch();state.running=false;state.paused=false;state.runId++;clearOperationUi();
@@ -38,7 +43,7 @@ function openSetup(mode){
   $('#setup-subtitle').textContent=mode==='survival'?'Explore the facility, gather supplies, and reach extraction.':'Choose a team size and take your squad into the arena.';
   const survivalOptions=`<div class="config-label">FACILITY CONDITIONS</div><div class="choice-row" id="difficulty-row"><button class="choice selected" data-value="standard">STANDARD</button><button class="choice" data-value="survival">HARDCORE</button><button class="choice" data-value="training">TRAINING</button></div><div class="config-label">FIELD KIT</div><div class="choice-row" id="loadout-row"><button class="choice selected" data-value="balanced">BALANCED</button><button class="choice" data-value="assault">ASSAULT</button><button class="choice" data-value="medic">MEDIC</button></div>`;
   const pvpOptions=`<div class="config-label">TEAM SIZE · AI FILL ${state.botFill?'ON':'OFF'}</div><div class="choice-row" id="size-row"><button class="choice selected" data-value="5">5 VS 5</button><button class="choice" data-value="10">10 VS 10</button></div><div class="config-label">YOUR TEAM</div><div class="choice-row" id="team-row"><button class="choice selected" data-value="blue">BLUE TEAM</button><button class="choice" data-value="red">RED TEAM</button></div><div class="config-label">MATCH TARGET</div><div class="choice-row" id="target-row"><button class="choice selected" data-value="50">FIRST TO 50</button><button class="choice" data-value="100">FIRST TO 100</button><button class="choice" data-value="250">FIRST TO 250</button></div>`;
-  const localRoom=mode==='pvp'&&typeof window!=='undefined'&&['localhost','127.0.0.1'].includes(window.location.hostname);
+  const localRoom=mode==='pvp'&&usesLocalRooms();
   const roomOptions=`<div class="config-label">DEV MATCH ROOM</div><div class="choice-row" id="room-row"><button class="choice selected" data-value="create">CREATE ROOM</button><button class="choice" data-value="join">JOIN WITH CODE</button></div><label class="config-label room-code-label hidden" for="room-code-input">ROOM CODE</label><input id="room-code-input" class="room-code-input hidden" maxlength="6" autocomplete="off" spellcheck="false" placeholder="ENTER 6-CHARACTER CODE"><p class="room-help">Rooms on this local preview are available only to browsers that can reach this computer.</p>`;
   $('#setup-options').innerHTML=mode==='survival'?survivalOptions:pvpOptions+(localRoom?roomOptions:'');
   $('#start-button').innerHTML=`${mode==='survival'?'BEGIN OPERATION':localRoom?'CREATE ROOM':'ENTER ARENA'} <span>→</span>`;
@@ -233,7 +238,7 @@ function startRoomMatch(snapshot){
 }
 async function startGame(){
   if(state.lobby){state.lobby.socket.send(JSON.stringify({type:'lobby',action:'start'}));return;}
-  if(state.mode!=='pvp'||!['localhost','127.0.0.1'].includes(window.location.hostname)){startLocalGame();return;}
+  if(state.mode!=='pvp'||!usesLocalRooms()){startLocalGame();return;}
   const runId=state.runId,button=$('#start-button'),original=button.innerHTML;
   button.disabled=true;button.textContent=state.roomAction==='join'?'JOINING ROOM…':'CREATING ROOM…';
   try{

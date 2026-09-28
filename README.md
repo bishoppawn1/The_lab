@@ -34,7 +34,7 @@ npm ci
 npm run dev
 ```
 
-Open [http://127.0.0.1:5174](http://127.0.0.1:5174). In Team Deathmatch, create a room, choose a team, and share its six-character code with another browser that can reach this preview. Other players select **Join with code** and their team. Everyone marks themselves ready; the host starts the match, and bots fill empty spots. Multiple rooms can wait or play independently. The room server is built into the local preview, so you do not need a second npm command. Lab Escape remains local. To create the GitHub Pages build:
+Open [http://127.0.0.1:5174](http://127.0.0.1:5174). In Team Deathmatch, create a room, choose a team, and share its six-character code with another browser that can reach this preview. For another device on the same network, open `http://YOUR-COMPUTER-LAN-IP:5174` there, then select **Join with code** and a team; your firewall must allow the connection. Everyone marks themselves ready; the host starts the match, and bots fill empty spots. Multiple rooms can wait or play independently. The room server is built into the local preview, so you do not need a second npm command. Lab Escape remains local. To create the GitHub Pages build:
 
 ```sh
 npm run build

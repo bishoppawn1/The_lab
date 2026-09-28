@@ -324,12 +324,12 @@ export class AuthoritativeMatch {
       this.visionCache.set(viewer.team,visible);
     }
     const seen=actor=>visible.has(`${Math.floor(actor.x/32)},${Math.floor(actor.y/32)}`);
-    const unit=actor=>({id:actor.id,team:actor.team,ai:actor.ai,x:actor.x,y:actor.y,angle:actor.angle,hp:actor.hp,armor:actor.armor,alive:actor.alive,invuln:actor.invuln});
+    const unit=actor=>({id:actor.id,team:actor.team,ai:actor.ai,x:actor.x,y:actor.y,r:actor.r,angle:actor.angle,hp:actor.hp,maxHp:actor.maxHp,armor:actor.armor,alive:actor.alive,invuln:actor.invuln,inventory:actor.inventory,active:actor.active,kills:actor.kills});
     return{type:'snapshot',elapsed:this.elapsed,seed:this.seed,team:viewer.team,scoreBlue:this.scoreBlue,scoreRed:this.scoreRed,winner:this.winner,
       self:{...unit(viewer),inventory:viewer.inventory,ammo:viewer.ammo,active:viewer.active,reloadUntil:viewer.reloadUntil},
       units:this.fighters.filter(actor=>actor.id!==viewerId&&(actor.team===viewer.team||actor.alive&&seen(actor))).map(unit),
       bullets:this.bullets.filter(bullet=>seen(bullet)).map(bullet=>({x:bullet.x,y:bullet.y,vx:bullet.vx,vy:bullet.vy,color:bullet.color})),
-      loot:this.loot.filter(seen).map(item=>({id:item.id,x:item.x,y:item.y,type:item.type,weapon:item.weapon,count:item.count})),
+      loot:this.loot.filter(seen).map(item=>({id:item.id,x:item.x,y:item.y,r:item.r,type:item.type,weapon:item.weapon,count:item.count,label:item.label,color:item.color})),
       doors:this.world.doors.map((door,index)=>({door,index})).filter(({door})=>visible.has(`${door.x},${door.y}`)||visible.has(`${door.x+1},${door.y}`)).map(({door,index})=>({index,open:door.open})),
     };
   }

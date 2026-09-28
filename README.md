@@ -27,13 +27,14 @@ A browser-based, top-down shooter with two operations: escape a hostile research
 
 ## Run locally
 
-The browser preview requires Node.js 22 or newer; no package installation is needed for that preview.
+The local preview requires Node.js 22 or newer. Install dependencies once, then start the preview:
 
 ```sh
+npm ci
 npm run dev
 ```
 
-Open [http://127.0.0.1:5174](http://127.0.0.1:5174). To create the GitHub Pages build:
+Open [http://127.0.0.1:5174](http://127.0.0.1:5174). Entering a deathmatch in this preview automatically starts the authoritative server and connects your browser. A second local tab can join the same match by selecting its team and entering the arena; when everyone leaves, the next match starts fresh. You do not need to run `npm run match-server` separately. Lab Escape remains local. To create the GitHub Pages build:
 
 ```sh
 npm run build
@@ -41,14 +42,13 @@ npm run build
 
 The build writes a static copy to `dist/` and adds cache-busting versions to local asset URLs. GitHub Actions builds and deploys every push to `main`. To enable the first deployment, select **GitHub Actions** under **Settings → Pages → Build and deployment**.
 
-## Authoritative match server (multiplayer step 2)
+## Local Dev Match server
 
-The server now owns a separate, headless deathmatch: its generated map, players, bots, doors, pickups, bullets, grenades, damage, respawns, and score. It simulates at 30 ticks per second and sends team-filtered snapshots over WebSocket. A client can request movement, aim, fire, reload, interact, grenade use, or slot selection; it cannot submit a successful hit or pickup. This process is currently a protocol foundation, with one match and automatic team assignment. Room codes and the multiplayer browser UI come in later steps; the GitHub Pages game still runs its bot-only match locally.
+The server owns the local Dev Match's generated map, players, bots, doors, pickups, bullets, grenades, damage, respawns, and score. It simulates at 30 ticks per second and sends team-filtered snapshots over WebSocket. The browser sends movement, aim, fire, reload, interact, grenade use, and slot selection; it cannot submit a successful hit or pickup. The local preview starts the server only when someone enters a deathmatch. Room codes and public server hosting still come later; the GitHub Pages game keeps its bot-only match.
 
-Install the server's `ws` dependency, then start it locally:
+For protocol testing, you can still run the standalone match server:
 
 ```sh
-npm ci
 npm run match-server
 ```
 
@@ -67,11 +67,13 @@ Movement axes are clamped to −1 through 1; `aim` is in radians; `slot` is 0–
 - `src/facility.js` — seeded, browser-independent facility generator; `createFacility('pvp', seed)` recreates the same layout and returns its seed in `world.seed`
 - `src/arena-core.js` — shared weapon and loot data, inventory, bot decisions and pathfinding, movement, doors, vision, damage, projectiles, and scoring
 - `src/authoritative-match.js` — browser-independent match owner and fixed-step simulation
-- `src/app.js` — local match orchestration, browser callbacks, input, sound, UI, and rendering; it uses the shared modules above
+- `src/app.js` — local and server-driven match orchestration, browser input, sound, UI, and rendering; it uses the shared modules above
+- `scripts/server.js` — local preview that starts a Dev Match server on demand
 - `scripts/match-server.js` — WebSocket process for one authoritative match
 - `test/arena-core.test.js` — runs shared map and arena rules directly in Node, without a browser
 - `test/authoritative-match.test.js` — verifies server ownership, controls, snapshots, and WebSocket transport
+- `test/devmatch-preview.test.js` — verifies automatic local server startup and fresh matches
 - `scripts/build.js` — static Pages build
 - `.github/workflows/pages.yml` — GitHub Pages deployment workflow
 
-The hosted game is currently a single-player browser simulation. Its PvP mode uses AI opponents and teammates; it does not yet connect to the match server.
+The hosted GitHub Pages game is still a single-player browser simulation. Pages cannot launch the Node server when a browser opens a match; public multiplayer will need the server deployed separately and the client pointed to that address.

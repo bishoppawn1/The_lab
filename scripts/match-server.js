@@ -22,10 +22,11 @@ export async function startMatchServer({host='127.0.0.1',port=8787,seed,teamSize
     if(new URL(request.url,'http://localhost').pathname!=='/match'){
       socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');socket.destroy();return;
     }
-    wss.handleUpgrade(request,socket,head,ws=>wss.emit('connection',ws));
+    wss.handleUpgrade(request,socket,head,ws=>wss.emit('connection',ws,request));
   });
-  wss.on('connection',socket=>{
-    const player=match.addPlayer();
+  wss.on('connection',(socket,request)=>{
+    const selected=new URL(request.url,'http://localhost').searchParams.get('team');
+    const player=match.addPlayer(selected==='blue'||selected==='red'?selected:null);
     if(!player){socket.close(1013,'Match full or finished');return;}
     sockets.set(socket,player.id);
     socket.send(JSON.stringify({type:'welcome',id:player.id,team:player.team,seed:match.seed,teamSize:match.teamSize,target:match.target,tickRate:30}));

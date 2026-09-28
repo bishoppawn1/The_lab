@@ -27,7 +27,7 @@ A browser-based, top-down shooter with two operations: escape a hostile research
 
 ## Run locally
 
-Requires Node.js 22 or newer; no `npm install` is needed.
+The browser preview requires Node.js 22 or newer; no package installation is needed for that preview.
 
 ```sh
 npm run dev
@@ -41,15 +41,37 @@ npm run build
 
 The build writes a static copy to `dist/` and adds cache-busting versions to local asset URLs. GitHub Actions builds and deploys every push to `main`. To enable the first deployment, select **GitHub Actions** under **Settings → Pages → Build and deployment**.
 
+## Authoritative match server (multiplayer step 2)
+
+The server now owns a separate, headless deathmatch: its generated map, players, bots, doors, pickups, bullets, grenades, damage, respawns, and score. It simulates at 30 ticks per second and sends team-filtered snapshots over WebSocket. A client can request movement, aim, fire, reload, interact, grenade use, or slot selection; it cannot submit a successful hit or pickup. This process is currently a protocol foundation, with one match and automatic team assignment. Room codes and the multiplayer browser UI come in later steps; the GitHub Pages game still runs its bot-only match locally.
+
+Install the server's `ws` dependency, then start it locally:
+
+```sh
+npm ci
+npm run match-server
+```
+
+It listens at `ws://127.0.0.1:8787/match` and exposes `http://127.0.0.1:8787/health`. Set `MATCH_HOST` and `MATCH_PORT` when hosting it separately from GitHub Pages. On connection, the server sends a `welcome` message with the player ID, team, map seed, team size, score target, and tick rate, followed by `snapshot` messages. Send control messages in this shape:
+
+```json
+{"type":"input","moveX":1,"moveY":0,"aim":0,"fire":true,"reload":false,"interact":false,"grenade":false,"slot":0}
+```
+
+Movement axes are clamped to −1 through 1; `aim` is in radians; `slot` is 0–3. A selected slot also determines which inventory item is replaced when interacting with a pickup and all four slots are occupied. The server validates range, collision, firing rate, ammunition, team damage, and pickup availability. Snapshots include the player's own inventory, allied units, enemies and items visible to the team, bullets and door states in view, and score.
+
 ## Project structure
 
 - `index.html` — operation selection, setup, and game interface
 - `styles.css` — responsive dark interface
 - `src/facility.js` — seeded, browser-independent facility generator; `createFacility('pvp', seed)` recreates the same layout and returns its seed in `world.seed`
 - `src/arena-core.js` — shared weapon and loot data, inventory, bot decisions and pathfinding, movement, doors, vision, damage, projectiles, and scoring
+- `src/authoritative-match.js` — browser-independent match owner and fixed-step simulation
 - `src/app.js` — local match orchestration, browser callbacks, input, sound, UI, and rendering; it uses the shared modules above
+- `scripts/match-server.js` — WebSocket process for one authoritative match
 - `test/arena-core.test.js` — runs shared map and arena rules directly in Node, without a browser
+- `test/authoritative-match.test.js` — verifies server ownership, controls, snapshots, and WebSocket transport
 - `scripts/build.js` — static Pages build
 - `.github/workflows/pages.yml` — GitHub Pages deployment workflow
 
-This game is currently a single-player browser simulation. Its PvP mode uses AI opponents and teammates; it does not connect players over a network. The shared rules and map seed are the first step toward an authoritative multiplayer match server.
+The hosted game is currently a single-player browser simulation. Its PvP mode uses AI opponents and teammates; it does not yet connect to the match server.

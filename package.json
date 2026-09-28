@@ -5,7 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/server.js",
+    "match-server": "node scripts/match-server.js",
     "build": "node scripts/build.js",
     "test": "node --test"
+  },
+  "dependencies": {
+    "ws": "^8.21.3"
   }
 }

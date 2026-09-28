@@ -1,3 +1,5 @@
+import { createFacility } from './facility.js?v=20260927-8';
+import { WEAPONS, LOOT_TABLE, SUPPLY_LOOT, createArenaStarterKit, collectInventoryItem, consumeInventoryItem, healWithMedkit, isBlocked, hasLineOfSight, moveActor, changeDoorState, canSeeOpponent, canFireAt, scoreVisibleTarget, findPathStep, steerActor, updateArenaBot, revealTiles, createGunProjectiles, advanceProjectile, applyDamage, recordElimination, winningTeam, botWeaponScore as scoreBotWeapon, botWeaponPlan as planBotWeapon, botCanTakeLoot as botAcceptsLoot } from './arena-core.js?v=20260927-8';
 const $ = (selector) => document.querySelector(selector);
 const canvas = $('#world');
 const ctx = canvas.getContext('2d');
@@ -5,35 +7,6 @@ const minimap = $('#minimap');
 const mctx = minimap.getContext('2d');
 const menu = $('#menu'), setup = $('#setup'), game = $('#game');
 const COLORS = { floor:'#202a22', floor2:'#222d24', wall:'#414d42', wallEdge:'#60705e', grid:'#ffffff07', lime:'#c0ef75', red:'#f2745e', blue:'#72a9ed', pale:'#e8ede7' };
-const WEAPONS = [
-  {name:'Pistol',kind:'gun',family:0,tier:0,damage:26,rate:280,magazine:12,speed:520,spread:0,color:'#eed27a',icon:'pistol'},
-  {name:'SMG',kind:'gun',family:1,tier:0,damage:12,rate:92,magazine:30,speed:600,spread:0,color:'#eabf72',icon:'smg'},
-  {name:'Shotgun',kind:'gun',family:2,tier:0,damage:18,rate:620,magazine:6,speed:465,spread:.25,pellets:7,maxRange:270,color:'#f2a875',icon:'shotgun'},
-  {name:'Rifle',kind:'gun',family:3,tier:0,damage:34,rate:185,magazine:30,speed:760,spread:0,color:'#d9c786',icon:'rifle'},
-  {name:'Knife',kind:'melee',family:4,damage:38,rate:350,ammo:Infinity,max:Infinity,range:58,color:'#c4d0c7',icon:'╱'},
-  {name:'Bat',kind:'melee',family:5,damage:55,rate:580,ammo:Infinity,max:Infinity,range:72,color:'#c39165',icon:'╱'},
-  {name:'Axe',kind:'melee',family:6,damage:75,rate:770,ammo:Infinity,max:Infinity,range:68,color:'#c2bcaa',icon:'⚒'},
-  {name:'Heavy Pistol',kind:'gun',family:0,tier:2,damage:43,rate:410,magazine:8,speed:610,spread:0,color:'#ed9c72',icon:'heavy-pistol'},
-  {name:'Tactical SMG',kind:'gun',family:1,tier:2,damage:17,rate:118,magazine:24,speed:680,spread:0,color:'#87c4a2',icon:'tactical-smg'},
-  {name:'Precision Rifle',kind:'gun',family:3,tier:2,damage:52,rate:480,magazine:8,speed:960,spread:0,color:'#9cbbdf',icon:'precision-rifle'},
-  {name:'Breach Shotgun',kind:'gun',family:2,tier:2,damage:22,rate:760,magazine:4,speed:510,spread:.23,pellets:8,maxRange:260,color:'#e59b8d',icon:'breach-shotgun'},
-  {name:'Machine Pistol',kind:'gun',family:0,tier:1,damage:15,rate:115,magazine:24,speed:570,spread:0,color:'#d9a4dd',icon:'machine-pistol'},
-  {name:'Drum SMG',kind:'gun',family:1,tier:1,damage:13,rate:97,magazine:50,speed:620,spread:0,color:'#9fb8d3',icon:'drum-smg'},
-  {name:'Auto Shotgun',kind:'gun',family:2,tier:1,damage:14,rate:390,magazine:8,speed:500,spread:.23,pellets:6,maxRange:250,color:'#e2ab6b',icon:'auto-shotgun'},
-  {name:'Slug Shotgun',kind:'gun',family:2,tier:2,damage:76,rate:720,magazine:5,speed:760,spread:0,maxRange:500,color:'#d8be91',icon:'slug-shotgun'},
-  {name:'Scout Carbine',kind:'gun',family:3,tier:1,damage:27,rate:145,magazine:28,speed:800,spread:0,color:'#a9d7a2',icon:'scout-carbine'},
-  {name:'Crowbar',kind:'melee',family:5,tier:1,damage:65,rate:500,ammo:Infinity,max:Infinity,range:77,color:'#a8c3ce',icon:'╱'},
-];
-const LOOT_TABLE = [
-  {type:'weapon',weapon:1,label:'SMG',color:'#eabf72',weight:1.2},{type:'weapon',weapon:2,label:'SHOTGUN',color:'#f2a875',weight:1.2},{type:'weapon',weapon:3,label:'RIFLE',color:'#d9c786',weight:1.15},
-  {type:'weapon',weapon:4,label:'KNIFE',color:'#c4d0c7',weight:.65},{type:'weapon',weapon:5,label:'BAT',color:'#c39165',weight:.6},{type:'weapon',weapon:6,label:'AXE',color:'#c2bcaa',weight:.45},
-  {type:'weapon',weapon:7,label:'HEAVY PISTOL · RARE',color:'#ed9c72',weight:.25},{type:'weapon',weapon:8,label:'TACTICAL SMG · RARE',color:'#87c4a2',weight:.23},{type:'weapon',weapon:9,label:'PRECISION RIFLE · RARE',color:'#9cbbdf',weight:.2},{type:'weapon',weapon:10,label:'BREACH SHOTGUN · RARE',color:'#e59b8d',weight:.18},
-  {type:'weapon',weapon:11,label:'MACHINE PISTOL',color:'#d9a4dd',weight:.28},{type:'weapon',weapon:12,label:'DRUM SMG',color:'#9fb8d3',weight:.24},{type:'weapon',weapon:13,label:'AUTO SHOTGUN',color:'#e2ab6b',weight:.22},
-  {type:'weapon',weapon:14,label:'SLUG SHOTGUN · RARE',color:'#d8be91',weight:.15},{type:'weapon',weapon:15,label:'SCOUT CARBINE',color:'#a9d7a2',weight:.25},{type:'weapon',weapon:16,label:'CROWBAR',color:'#a8c3ce',weight:.2},
-  {type:'health',label:'MEDKIT',color:'#90d485',weight:13},{type:'armor',label:'ARMOR',color:'#78b5de',weight:10},{type:'grenade',label:'GRENADE',color:'#dd8e68',weight:8},
-];
-const SUPPLY_LOOT = LOOT_TABLE.filter(item=>item.type!=='weapon');
-const ARENA_STARTERS=[null,null,null,null,1,1,2,2,3,3,4,5,6,11,12,13,15,16,7,8,9,10,14];
 const PLAYER_VIEW_TILES = 14;
 const PLAYER_SIGHT_RANGE = 320;
 const BOT_SIGHT_RANGE = PLAYER_VIEW_TILES * 32;
@@ -44,7 +17,7 @@ const GRENADE_THROW_DISTANCE = 210;
 const MELEE_SWING_MS = 300;
 function weightedLoot(table=LOOT_TABLE){let value=Math.random()*table.reduce((sum,item)=>sum+item.weight,0);for(const item of table){value-=item.weight;if(value<=0)return item;}return table.at(-1);}
 
-const state = {running:false,paused:false,runId:0,mode:'survival',world:null,player:null,bots:[],enemies:[],bullets:[],loot:[],lootRespawns:[],lootBaseCount:0,lootSpawnTimer:0,ambientLootId:0,particles:[],decor:[],roomProps:[],keys:new Set(),mouse:{x:0,y:0,down:false},touchFire:false,camera:{x:0,y:0},lastTime:0,elapsed:0,fireAt:0,round:1,spawnTimer:0,scoreBlue:0,scoreRed:0,kills:0,found:0,skips:0,teamSize:5,feed:[],visibleMap:false,roundEnd:false,botFill:true,pendingLoot:null,settings:{team:'blue',target:50}};
+const state = {running:false,paused:false,runId:0,mode:'survival',world:null,player:null,bots:[],enemies:[],bullets:[],loot:[],lootRespawns:[],lootBaseCount:0,lootSpawnTimer:0,ambientLootId:0,particles:[],decor:[],roomProps:[],keys:new Set(),mouse:{x:0,y:0,down:false},touchFire:false,camera:{x:0,y:0},lastTime:0,elapsed:0,fireAt:0,round:1,spawnTimer:0,scoreBlue:0,scoreRed:0,kills:0,found:0,skips:0,teamSize:5,feed:[],visibleMap:false,roundEnd:false,botFill:true,botSightRange:BOT_SIGHT_RANGE,pendingLoot:null,settings:{team:'blue',target:50}};
 let lastNotice=0, audioContext=null;
 const rand=(a,b)=>a+Math.random()*(b-a), clamp=(n,a,b)=>Math.max(a,Math.min(b,n)), dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y), choice=a=>a[Math.floor(Math.random()*a.length)];
 
@@ -52,70 +25,11 @@ function clearOperationUi(){for(const id of ['pause-overlay','end-overlay','roun
 function showMenu(){state.running=false;state.paused=false;state.runId++;clearOperationUi();menu.classList.remove('hidden');setup.classList.add('hidden');game.classList.add('hidden');}
 function openSetup(mode){state.running=false;state.paused=false;state.runId++;clearOperationUi();state.mode=mode;state.teamSize=5;state.settings={team:'blue',target:50,difficulty:'standard',loadout:'balanced'};menu.classList.add('hidden');game.classList.add('hidden');setup.classList.remove('hidden');$('#setup-title').innerHTML=mode==='survival'?'LAB<br><span>ESCAPE.</span>':'TEAM<br><span>DEATHMATCH.</span>';$('#setup-subtitle').textContent=mode==='survival'?'Explore the facility, gather supplies, and reach extraction.':'Choose a team size and take your squad into the arena.';$('#setup-options').innerHTML=mode==='survival'?`<div class="config-label">FACILITY CONDITIONS</div><div class="choice-row" id="difficulty-row"><button class="choice selected" data-value="standard">STANDARD</button><button class="choice" data-value="survival">HARDCORE</button><button class="choice" data-value="training">TRAINING</button></div><div class="config-label">FIELD KIT</div><div class="choice-row" id="loadout-row"><button class="choice selected" data-value="balanced">BALANCED</button><button class="choice" data-value="assault">ASSAULT</button><button class="choice" data-value="medic">MEDIC</button></div>`:`<div class="config-label">TEAM SIZE · AI FILL ${state.botFill?'ON':'OFF'}</div><div class="choice-row" id="size-row"><button class="choice selected" data-value="5">5 VS 5</button><button class="choice" data-value="10">10 VS 10</button></div><div class="config-label">YOUR TEAM</div><div class="choice-row" id="team-row"><button class="choice selected" data-value="blue">BLUE TEAM</button><button class="choice" data-value="red">RED TEAM</button></div><div class="config-label">MATCH TARGET</div><div class="choice-row" id="target-row"><button class="choice selected" data-value="50">FIRST TO 50</button><button class="choice" data-value="100">FIRST TO 100</button><button class="choice" data-value="250">FIRST TO 250</button></div>`;$('#start-button').innerHTML=`${mode==='survival'?'BEGIN OPERATION':'ENTER ARENA'} <span>→</span>`;setup.querySelectorAll('.choice-row').forEach(row=>row.addEventListener('click',e=>{const b=e.target.closest('.choice');if(!b)return;row.querySelectorAll('.choice').forEach(x=>x.classList.remove('selected'));b.classList.add('selected');if(row.id==='size-row')state.teamSize=Number(b.dataset.value);if(row.id==='team-row')state.settings.team=b.dataset.value;if(row.id==='target-row')state.settings.target=Number(b.dataset.value);if(row.id==='difficulty-row')state.settings.difficulty=b.dataset.value;if(row.id==='loadout-row')state.settings.loadout=b.dataset.value;}));}
 function floorTile(x,y){return state.world.map[y]?.[x]===0;}
-function partitionFacility(w,h,carve,roomCount){
-  const gap=3,minSize=22,sections=[{x:6,y:6,w:w-12,h:h-12}],segments=[];
-  const capacity=section=>Math.floor((section.w+gap)/(minSize+gap))*Math.floor((section.h+gap)/(minSize+gap));
-  // A perimeter hall joins every split, so even deeply nested sections stay connected.
-  carve(3,3,w-4,5);carve(3,h-6,w-4,h-4);
-  carve(3,3,5,h-4);carve(w-6,3,w-4,h-4);
-  while(sections.length<roomCount){
-    const totalCapacity=sections.reduce((sum,section)=>sum+capacity(section),0),options=[];
-    for(const section of sections)for(const vertical of [true,false]){
-      const size=vertical?section.w:section.h;
-      for(let cut=minSize;cut<=size-minSize-gap;cut++){
-        const first={...section,[vertical?'w':'h']:cut};
-        const second=vertical?{...section,x:section.x+cut+gap,w:section.w-cut-gap}:{...section,y:section.y+cut+gap,h:section.h-cut-gap};
-        // Keep enough usable space for every themed room, even with extreme random rolls.
-        if(totalCapacity-capacity(section)+capacity(first)+capacity(second)>=roomCount)options.push({section,vertical,cut,first,second});
-      }
-    }
-    const {section,vertical,cut,first,second}=choice(options);
-    const hall=vertical?{x1:section.x+cut,y1:section.y-gap,x2:section.x+cut+gap-1,y2:section.y+section.h+gap-1}:{x1:section.x-gap,y1:section.y+cut,x2:section.x+section.w+gap-1,y2:section.y+cut+gap-1};
-    carve(hall.x1,hall.y1,hall.x2,hall.y2);segments.push(hall);
-    sections.splice(sections.indexOf(section),1,first,second);
-  }
-  return{sections,corridors:{segments}};
-}
-function generateWorld(mode){
-  const w=160,h=116,map=Array.from({length:h},()=>Array(w).fill(1));
-  const carve=(x1,y1,x2,y2)=>{for(let y=y1;y<=y2;y++)for(let x=x1;x<=x2;x++)if(x>0&&y>0&&x<w-1&&y<h-1)map[y][x]=0;};
-  const names=['WORKSHOP','ARMORY','RESEARCH LAB','SPECIMEN HOLD','MEDICAL','STORAGE','NEST CHAMBER','CONTROL ROOM','SERVER ROOM','POWER STATION','OBSERVATION','CHEMISTRY','MAINTENANCE','ARCHIVES','QUARANTINE','GENERATOR'];
-  for(let i=names.length-1;i>0;i--){const j=Math.floor(rand(0,i+1));[names[i],names[j]]=[names[j],names[i]];}
-  const {sections,corridors}=partitionFacility(w,h,carve,names.length+2),doors=[];
-  const roomSections=new Map(),center=room=>({x:(room.x+Math.floor(room.w/2)+.5)*32,y:(room.y+Math.floor(room.h/2)+.5)*32});
-  const rooms=sections.map(section=>{
-    const rw=Math.floor(rand(11,Math.min(21,section.w-4)+1)),rh=Math.floor(rand(11,Math.min(19,section.h-4)+1));
-    const room={x:Math.floor(rand(section.x+2,section.x+section.w-rw-1)),y:Math.floor(rand(section.y+2,section.y+section.h-rh-1)),w:rw,h:rh};
-    roomSections.set(room,section);return room;
-  });
-  // Vary both starting sides while keeping entry and extraction well separated.
-  const pairs=[];for(let i=0;i<rooms.length;i++)for(let j=i+1;j<rooms.length;j++)pairs.push({a:rooms[i],b:rooms[j],distance:dist(center(rooms[i]),center(rooms[j]))});
-  const longest=Math.max(...pairs.map(pair=>pair.distance)),pair=choice(pairs.filter(pair=>pair.distance>=longest*.85));
-  const [entry,extraction]=Math.random()<.5?[pair.a,pair.b]:[pair.b,pair.a];
-  rooms.splice(0,rooms.length,entry,...rooms.filter(room=>room!==entry&&room!==extraction),extraction);
-  rooms.forEach((room,index)=>{
-    room.name=index===0?'ENTRY BAY':index===rooms.length-1?'EXTRACTION BAY':names[index-1];
-    carve(room.x+1,room.y+1,room.x+room.w-2,room.y+room.h-2);
-    const section=roomSections.get(room),doorX=room.x+Math.floor(rand(3,room.w-4)),south=Math.random()<.5;
-    const boundaryY=south?room.y+room.h-1:room.y,corridorY=south?section.y+section.h+1:section.y-2;
-    carve(doorX,Math.min(boundaryY,corridorY),doorX+1,Math.max(boundaryY,corridorY));
-    doors.push({x:doorX,y:boundaryY,cx:(doorX+1)*32,cy:(boundaryY+.5)*32,room,open:index===0,approach:{x:(doorX+1)*32,y:(boundaryY+(south?1.5:-.5))*32}});
-  });
-  for(const room of rooms)if(Math.random()<.68){for(let attempt=0;attempt<8;attempt++){
-    const x=Math.floor(rand(room.x+3,room.x+room.w-4)),y=Math.floor(rand(room.y+3,room.y+room.h-4));
-    if(Math.hypot(x-(room.x+room.w/2),y-(room.y+room.h/2))<4)continue;
-    for(let oy=0;oy<2;oy++)for(let ox=0;ox<2;ox++)map[y+oy][x+ox]=1;break;
-  }}
-  const start=center(entry),end=center(extraction);
-  const doorTiles=new Map();for(const door of doors)for(let dx=0;dx<2;dx++)doorTiles.set(`${door.x+dx},${door.y}`,door);
-  state.world={w,h,map,tile:32,mode,rooms,doors,doorTiles,corridors,exit:{...end,r:39},spawnZones:[start,end],explored:new Set(),visible:new Set(),visionAt:0,labels:rooms.map(room=>({...center(room),text:room.name}))};
-  state.decor=[];for(let i=0;i<650;i++){const x=rand(2,w-2),y=rand(2,h-2);if(floorTile(Math.floor(x),Math.floor(y)))state.decor.push({x:(x+.5)*32,y:(y+.5)*32,r:rand(1,4),alpha:rand(.04,.15),kind:Math.random()>.5?'stain':'debris'});}
-  const themes={'ARMORY':['rack',5],'MEDICAL':['bed',4],'NEST CHAMBER':['nest',6],'SPECIMEN HOLD':['tank',4],'QUARANTINE':['tank',3],'STORAGE':['crate',5],'WORKSHOP':['bench',4],'RESEARCH LAB':['console',4],'CONTROL ROOM':['console',5],'SERVER ROOM':['server',5],'POWER STATION':['generator',3],'OBSERVATION':['console',3],'CHEMISTRY':['tank',3],'MAINTENANCE':['crate',3],'ARCHIVES':['shelf',5],'GENERATOR':['generator',4]};
-  state.roomProps=[];for(const room of rooms){const [kind,count]=themes[room.name]||[];if(!kind)continue;for(let i=0;i<count;i++)for(let attempt=0;attempt<40;attempt++){
-    const tx=Math.floor(rand(room.x+2,room.x+room.w-2)),ty=Math.floor(rand(room.y+2,room.y+room.h-2)),x=(tx+.5)*32,y=(ty+.5)*32;
-    if(!floorTile(tx,ty)||Math.hypot(x-center(room).x,y-center(room).y)<68||state.roomProps.some(prop=>dist(prop,{x,y})<36))continue;
-    state.roomProps.push({x,y,kind});break;
-  }}
+function generateWorld(mode,seed=Math.floor(Math.random()*0x100000000)){
+  const generated=createFacility(mode,seed);
+  state.world=generated.world;
+  state.decor=generated.decor;
+  state.roomProps=generated.roomProps;
 }
 function findOpen(nearX=31,nearY=24,minDistance=0,maxDistance=Infinity,accept=()=>true){for(let i=0;i<900;i++){const tx=Math.floor(rand(1,state.world.w-1)),ty=Math.floor(rand(1,state.world.h-1)),p={x:(tx+.5)*32,y:(ty+.5)*32},d=Math.hypot(tx-nearX,ty-nearY);if(floorTile(tx,ty)&&accept(tx,ty)&&d>=minDistance&&d<=maxDistance&&!blocked(p.x,p.y,9)&&!occupied(p,18))return p;}let fallback=null,best=Infinity;for(let y=1;y<state.world.h-1;y++)for(let x=1;x<state.world.w-1;x++){const p={x:(x+.5)*32,y:(y+.5)*32},d=(x+.5-nearX)**2+(y+.5-nearY)**2;if(d<best&&d>=minDistance**2&&d<=maxDistance**2&&accept(x,y)&&floorTile(x,y)&&!blocked(p.x,p.y,9)&&!occupied(p,18)){fallback=p;best=d;}}return fallback||{x:(nearX+.5)*32,y:(nearY+.5)*32};}
 function occupied(p,r){return state.enemies.some(e=>e.alive&&dist(p,e)<r+e.r)||state.bots.some(b=>b.alive&&dist(p,b)<r+b.r)||state.player&&state.player.alive&&dist(p,state.player)<r+state.player.r;}
@@ -140,8 +54,24 @@ function dropBotLoadout(bot){
   if(bot.pickedArmor&&bot.armor>0)state.loot.push(dropInventorySlot({item:'armor'},bot,9));
   bot.inventory=[0,null,null,null];bot.pickedSlots=[false,false,false,false];bot.pickedArmor=false;bot.active=0;
 }
-function equip(index){const p=state.player;if(index<0||index>3||!p)return;if(state.pendingLoot){const item=state.pendingLoot;if(!state.loot.includes(item)){state.pendingLoot=null;$('#inventory-prompt').classList.add('hidden');announce('PICKUP NO LONGER AVAILABLE');renderWeapons();return;}const old=p.inventory[index],replacement=item.type==='weapon'?item.weapon:{item:item.type==='health'?'health':item.type,count:item.count||1};if(old!=null)state.loot.push(dropInventorySlot(old));p.inventory[index]=replacement;if(typeof replacement==='number')p.ammo[replacement]=WEAPONS[replacement].magazine;takeLoot(item);state.pendingLoot=null;$('#inventory-prompt').classList.add('hidden');state.found++;$('#loot-count').textContent=String(state.found);const label=item.type==='weapon'?WEAPONS[item.weapon].name:inventoryItemLabel(replacement);log(`${label} assigned to slot ${index+1}.`,'good');announce(`${label.toUpperCase()} COLLECTED`);p.active=index;renderWeapons();$('#grenade-count').textContent=String(inventoryGrenades());return;}if(p.inventory[index]==null)return;p.active=index;renderWeapons();}
-
+function equip(index){
+  const p=state.player;
+  if(index<0||index>3||!p)return;
+  if(state.pendingLoot){
+    const item=state.pendingLoot;
+    if(!state.loot.includes(item)){state.pendingLoot=null;$('#inventory-prompt').classList.add('hidden');announce('PICKUP NO LONGER AVAILABLE');renderWeapons();return;}
+    const result=collectInventoryItem(p,item,index);
+    if(!result.collected)return;
+    if(result.replaced!=null)state.loot.push(dropInventorySlot(result.replaced));
+    takeLoot(item);state.pendingLoot=null;$('#inventory-prompt').classList.add('hidden');state.found++;
+    $('#loot-count').textContent=String(state.found);
+    const label=item.type==='weapon'?WEAPONS[item.weapon].name:inventoryItemLabel(p.inventory[index]);
+    log(`${label} assigned to slot ${index+1}.`,'good');announce(`${label.toUpperCase()} COLLECTED`);
+    p.active=index;renderWeapons();$('#grenade-count').textContent=String(inventoryGrenades());return;
+  }
+  if(p.inventory[index]==null)return;
+  p.active=index;renderWeapons();
+}
 const weaponShapes=[
   '<path d="M4 10h17l5 2v5H9L6 15H4z"/><path d="M13 16h5l2 6h-5z"/>',
   '<path d="M2 8h25l6 3v5H9l-4-2H2z"/><path d="M13 16h5l2 6h-5z"/><path d="M4 8V5h7v3"/>',
@@ -222,7 +152,7 @@ function startGame(){clearOperationUi();state.runId++;setup.classList.add('hidde
   if(state.mode==='survival'){state.player.x=state.world.spawnZones[0].x;state.player.y=state.world.spawnZones[0].y;state.player.invuln=2.5;if(state.settings.difficulty==='training'){state.player.hp=state.player.maxHp=150;state.player.armor=20;}else if(state.settings.difficulty==='survival'){state.player.hp=state.player.maxHp=80;}spawnLoot(46);spawnEnemy('guard',state.world.rooms[0]);const threatTotal=state.settings.difficulty==='training'?2:state.settings.difficulty==='survival'?5:3;for(let i=0;i<threatTotal;i++)spawnEnemy('monster');seedRoomThreats();$('#mode-label').textContent='LAB ESCAPE';$('#objective-label').textContent='REACH EXTRACTION';$('#objective-detail').textContent='Explore the lab';$('#objective-detail').classList.remove('blue-text');$('#score-panel').classList.add('hidden');$('#map-status').textContent='— EXPLORE';log('You entered Facility 07-C. Find a way out.','good');log('Supplies are marked by their silhouettes. Press E to collect.','good');}
   else {spawnLoot(40);const playerColor=state.settings.team==='blue'?'blue':'red',enemyColor=playerColor==='blue'?'red':'blue';state.player.team=playerColor;state.player.x=state.world.spawnZones[playerColor==='blue'?0:1].x;state.player.y=state.world.spawnZones[playerColor==='blue'?0:1].y;for(let i=0;i<state.teamSize-1;i++)spawnBot(playerColor,i);for(let i=0;i<state.teamSize;i++)spawnBot(enemyColor,i);$('#mode-label').textContent=`TEAM DEATHMATCH · ${state.teamSize}V${state.teamSize}`;$('#objective-label').textContent=`FIRST TEAM TO ${state.settings.target} WINS`;$('#objective-detail').textContent=`Win ${state.settings.target} eliminations`;$('#score-target').textContent=`FIRST TO ${state.settings.target}`;$('#score-panel').classList.remove('hidden');$('#teams-line').textContent=`${state.teamSize}V${state.teamSize} · BOTS ACTIVE`;$('#map-status').textContent='— TEAM VISION';log(`${state.teamSize}v${state.teamSize} match active. AI squads deployed.`,'good');log('Collect gear, then fight for your team.');}
   $('#threat-count').textContent=state.mode==='survival'?String(state.enemies.filter(e=>e.alive&&e.type==='monster').length):String(state.bots.length+1);$('#kill-count').textContent='0';$('#loot-count').textContent='0';$('#grenade-count').textContent=String(inventoryGrenades());$('#blue-score').textContent='0';$('#red-score').textContent='0';$('#health-value').textContent=String(state.player.hp);$('#health-bar').style.width='100%';$('#armor-value').textContent=`+ ${state.player.armor} ARM`;$('#armor-bar').style.width=`${state.player.armor}%`;renderWeapons();$('#event-log').innerHTML='';updateHUD();state.running=true;state.paused=false;state.lastTime=performance.now();resizeCanvas();const runId=state.runId;requestAnimationFrame(now=>frame(now,runId));}
-function arenaStarterKit(){const second=choice(ARENA_STARTERS),inventory=[0,second,null,null],ammo={0:WEAPONS[0].magazine};if(second!=null&&WEAPONS[second].kind==='gun')ammo[second]=WEAPONS[second].magazine;return{inventory,ammo,active:second==null?0:Math.floor(Math.random()*2)};}
+function arenaStarterKit(){return createArenaStarterKit(Math.random);}
 function spawnBot(team,i){const zone=state.world.spawnZones[team==='blue'?0:1],pos=findOpen(zone.x/32,zone.y/32,0,7);const b={...pos,team,ai:true,alive:true,r:10,hp:100,maxHp:100,speed:rand(85,115),...arenaStarterKit(),pickedSlots:[false,false,false,false],pickedArmor:false,angle:0,fireTime:rand(0,500),stun:0,invuln:0,respawn:0,id:`${team}${i}`,kills:0,target:null,think:rand(0,1)};state.bots.push(b);}
 function spawnEnemy(type='monster',room=null,chosenVariant=null){
   const origin=state.player||{x:40*32,y:32*32};
@@ -258,9 +188,9 @@ function update(dt,now){const p=state.player;if(!p)return;const cx=Number(canvas
   for(const e of state.enemies)if(e.alive)updateEnemy(e,dt,now);for(const bullet of state.bullets)advanceBullet(bullet,dt);
   state.bullets=state.bullets.filter(b=>!b.dead);respawnLoot();updateLootSpawns(dt);for(const l of state.loot)l.bob+=dt*3;for(const part of state.particles){part.x+=part.vx*dt;part.y+=part.vy*dt;part.life-=dt;}state.particles=state.particles.filter(x=>x.life>0);
   if(state.mode==='survival'){state.spawnTimer+=dt;if(state.enemies.filter(e=>e.alive&&e.type==='monster').length<(state.settings.difficulty==='survival'?6:4)&&state.spawnTimer>14){spawnEnemy('monster');state.spawnTimer=0;}if(!p.alive)finish(false,'SIGNAL LOST','You were eliminated inside the facility.');}
-  else{state.bots=state.bots.filter(b=>b.alive||b.respawn>0);if(!p.alive){p.respawn-=dt;if(p.respawn<=0)respawnPlayer();}$('#blue-score').textContent=String(state.scoreBlue);$('#red-score').textContent=String(state.scoreRed);if(state.scoreBlue>=state.settings.target)finish(state.player.team==='blue','BLUE TEAM WINS',`Final score ${state.scoreBlue} : ${state.scoreRed}`);else if(state.scoreRed>=state.settings.target)finish(state.player.team==='red','RED TEAM WINS',`Final score ${state.scoreBlue} : ${state.scoreRed}`);}
+  else{state.bots=state.bots.filter(b=>b.alive||b.respawn>0);if(!p.alive){p.respawn-=dt;if(p.respawn<=0)respawnPlayer();}$('#blue-score').textContent=String(state.scoreBlue);$('#red-score').textContent=String(state.scoreRed);const winner=winningTeam(state,state.settings.target);if(winner)finish(state.player.team===winner,`${winner.toUpperCase()} TEAM WINS`,`Final score ${state.scoreBlue} : ${state.scoreRed}`);}
 }
-function blocked(x,y,radius=7){const t=state.world.tile,checks=[[x-radius,y-radius],[x+radius,y-radius],[x-radius,y+radius],[x+radius,y+radius]];return checks.some(([cx,cy])=>{const tx=Math.floor(cx/t),ty=Math.floor(cy/t);return !floorTile(tx,ty)||state.world.doorTiles?.get(`${tx},${ty}`)?.open===false;});}
+function blocked(x,y,radius=7){return isBlocked(state.world,x,y,radius);}
 function nearbyDoor(actor,radius=54,closedOnly=false){
   const t=state.world?.tile||32;
   return state.world?.doors?.filter(door=>{
@@ -270,13 +200,10 @@ function nearbyDoor(actor,radius=54,closedOnly=false){
   }).sort((a,b)=>dist(actor,{x:a.cx,y:a.cy})-dist(actor,{x:b.cx,y:b.cy}))[0]||null;
 }
 function setDoorOpen(door,open,actor=null){
-  if(!door||door.open===open)return false;
-  const t=state.world.tile;
-  if(!open&&[state.player,...state.bots,...state.enemies].some(unit=>unit?.alive&&unit.x+(unit.r||10)>door.x*t&&unit.x-(unit.r||10)<(door.x+2)*t&&unit.y+(unit.r||10)>door.y*t&&unit.y-(unit.r||10)<(door.y+1)*t)){
-    if(actor===state.player)announce('DOORWAY BLOCKED — STEP CLEAR');
+  if(!changeDoorState(state.world,door,open,[state.player,...state.bots,...state.enemies])){
+    if(actor===state.player&&door&&!open&&door.open)announce('DOORWAY BLOCKED — STEP CLEAR');
     return false;
   }
-  door.open=open;state.world.visionAt=-Infinity;
   if(actor===state.player)announce(`${door.room.name} ${open?'OPENED':'CLOSED'}`);
   return true;
 }
@@ -297,18 +224,11 @@ function bulletTargets(bullet){
   return[];
 }
 function advanceBullet(bullet,dt){
-  const dx=bullet.vx*dt,dy=bullet.vy*dt,steps=Math.max(1,Math.ceil(Math.hypot(dx,dy)/5)),stepDistance=Math.hypot(dx,dy)/steps,targets=bulletTargets(bullet);
-  for(let i=0;i<steps;i++){
-    if((bullet.travelled||0)+stepDistance>(bullet.maxRange||Infinity)){bullet.dead=true;break;}
-    bullet.x+=dx/steps;bullet.y+=dy/steps;bullet.travelled=(bullet.travelled||0)+stepDistance;
-    if(blocked(bullet.x,bullet.y,2)){bullet.dead=true;break;}
-    const target=targets.find(target=>target.alive&&dist(bullet,target)<target.r+2);
-    if(target){hit(target,bullet.damage,bullet.owner);bullet.dead=true;break;}
-  }
-  bullet.life-=dt;if(bullet.life<=0)bullet.dead=true;
+  const target=advanceProjectile(state.world,bullet,dt,bulletTargets(bullet));
+  if(target)hit(target,bullet.damage,bullet.owner);
 }
-function updateVision(now){const world=state.world;if(now-world.visionAt<180)return;world.visionAt=now;world.visible.clear();const p=state.player,observers=p?.alive?[p]:[];if(state.mode==='pvp')observers.push(...state.bots.filter(b=>b.alive&&b.team===p.team));else observers.push(...state.enemies.filter(e=>e.alive&&e.type==='guard'&&e.team===p.team));for(const actor of observers){const radius=actor===p?PLAYER_VIEW_TILES:state.mode==='pvp'?9:8;const tx=Math.floor(actor.x/32),ty=Math.floor(actor.y/32);for(let y=Math.max(1,ty-radius);y<=Math.min(world.h-2,ty+radius);y++)for(let x=Math.max(1,tx-radius);x<=Math.min(world.w-2,tx+radius);x++){if(Math.hypot(x-tx,y-ty)>radius||!floorTile(x,y))continue;const center={x:(x+.5)*32,y:(y+.5)*32};if(lineClear(actor,center)){const key=`${x},${y}`;world.visible.add(key);world.explored.add(key);}}}}
-function move(e,dx,dy){const nx=e.x+dx,ny=e.y+dy,r=Math.max(5,(e.r||10)-1);if(!blocked(nx,e.y,r))e.x=nx;if(!blocked(e.x,ny,r))e.y=ny;}
+function updateVision(now){const world=state.world;if(now-world.visionAt<180)return;world.visionAt=now;const p=state.player,observers=p?.alive?[p]:[];if(state.mode==='pvp')observers.push(...state.bots.filter(b=>b.alive&&b.team===p.team));else observers.push(...state.enemies.filter(e=>e.alive&&e.type==='guard'&&e.team===p.team));world.visible=revealTiles(world,observers.map(actor=>({actor,radius:actor===p?PLAYER_VIEW_TILES:state.mode==='pvp'?9:8})));for(const key of world.visible)world.explored.add(key);}
+function move(e,dx,dy){moveActor(state.world,e,dx,dy);}
 function reloadWeapon(now=performance.now()){const p=state.player,id=p?.inventory[p.active],w=id==null?null:WEAPONS[id];if(!p||!w||w.kind!=='gun'||(p.ammo[id]??w.magazine)>=w.magazine||p.reloadUntil>now)return;p.reloadingWeapon=id;p.reloadUntil=now+(w.family===2&&w.name!=='Auto Shotgun'?1050:780);$('#reload-status').textContent='RELOADING…';log(`${w.name} reloading.`);}
 function shoot(entity,angle,now){
   const slot=entity.inventory[entity.active];
@@ -316,8 +236,7 @@ function shoot(entity,angle,now){
     if(now<entity.fireAt)return;
     if(slot.item==='health'){
       if(entity.hp>=entity.maxHp){announce('HEALTH ALREADY FULL');entity.fireAt=now+300;return;}
-      entity.hp=Math.min(entity.maxHp,entity.hp+45);slot.count--;
-      if(slot.count<=0)entity.inventory[entity.active]=null;
+      if(!healWithMedkit(entity,entity.active))return;
       entity.fireAt=now+350;log('Medkit used.','good');announce('MEDKIT USED');sound(560,'sine',.1,.025);renderWeapons();return;
     }
     if(slot.item==='grenade'){useGrenade(angle);return;}
@@ -341,11 +260,7 @@ function shoot(entity,angle,now){
     sound(155,'triangle',.12,entity===state.player?.025:.012);
     return;
   }
-  const n=w.pellets||1,muzzleX=entity.x+Math.cos(angle)*18,muzzleY=entity.y+Math.sin(angle)*18;
-  for(let i=0;i<n;i++){
-    const a=angle+(n>1?rand(-w.spread,w.spread):0);
-    state.bullets.push({x:muzzleX,y:muzzleY,vx:Math.cos(a)*w.speed,vy:Math.sin(a)*w.speed,owner:entity,damage:w.damage,life:1.3,maxRange:w.maxRange,color:w.color});
-  }
+  state.bullets.push(...createGunProjectiles(entity,w,angle,Math.random));
   if(state.mode==='pvp')for(const bot of state.bots){
     if(!bot.alive||bot===entity||bot.team===entity.team||dist(bot,entity)>BOT_SIGHT_RANGE)continue;
     const towardBot=Math.atan2(bot.y-entity.y,bot.x-entity.x);
@@ -357,143 +272,113 @@ function shoot(entity,angle,now){
   if(entity===state.player)renderWeapons();
 }
 function angleDiff(a,b){return Math.atan2(Math.sin(a-b),Math.cos(a-b));}
-function hit(target,damage,source){if(!target.alive||target.invuln>0)return;target.hitFlash=.12;if(target.ai&&source?.alive&&source.team!==target.team){target.recentAttacker=source;target.attackedAt=state.elapsed;target.think=0;}let rest=damage;if(target.armor){const absorb=Math.min(target.armor,rest*.64);target.armor-=absorb;rest-=absorb;}target.hp-=rest;burst(target.x,target.y,target.team==='red'||target.type==='monster'?'#f2745e':'#c0ef75',3);if(target.hp<=0){target.hp=0;target.alive=false;burst(target.x,target.y,target.type==='monster'?'#c25e48':target.team==='blue'?'#72a9ed':'#f2745e',15);sound(80,'triangle',.13,.025);if(target===state.player){log('Operator down.','danger');if(state.mode==='pvp'){dropPlayerLoadout();if(source?.team&&source.team!==target.team){if(target.team==='blue')state.scoreRed++;else state.scoreBlue++;}target.respawn=2.1;setBanner('OPERATOR DOWN · RESPAWNING');}return;}if(state.mode==='pvp'&&target.ai){dropBotLoadout(target);target.respawn=2.4;}if(source===state.player){state.kills++;$('#kill-count').textContent=String(state.kills);state.player.kills++;if(state.mode==='pvp'){if(target.team==='blue')state.scoreRed++;else state.scoreBlue++;}const victim=target.type==='monster'?`${target.variant||'monster'} neutralized`:target.team?.toUpperCase()+' unit eliminated';log(`${victim}.`,'good');announce(target.type==='monster'?`${(target.variant||'MONSTER').toUpperCase()} NEUTRALIZED`:'ENEMY ELIMINATED');}else if(state.mode==='pvp'){if(target.team==='blue')state.scoreRed++;else state.scoreBlue++;}}}
+function hit(target,damage,source){
+  const result=applyDamage(target,damage);
+  if(!result.applied)return;
+  if(target.ai&&source?.alive&&source.team!==target.team){target.recentAttacker=source;target.attackedAt=state.elapsed;target.think=0;}
+  burst(target.x,target.y,target.team==='red'||target.type==='monster'?'#f2745e':'#c0ef75',3);
+  if(!result.killed)return;
+  burst(target.x,target.y,target.type==='monster'?'#c25e48':target.team==='blue'?'#72a9ed':'#f2745e',15);
+  sound(80,'triangle',.13,.025);
+  if(target===state.player){
+    log('Operator down.','danger');
+    if(state.mode==='pvp'){
+      dropPlayerLoadout();
+      if(source?.team&&source.team!==target.team)recordElimination(state,target.team);
+      target.respawn=2.1;setBanner('OPERATOR DOWN · RESPAWNING');
+    }
+    return;
+  }
+  if(state.mode==='pvp'&&target.ai){dropBotLoadout(target);target.respawn=2.4;}
+  if(source===state.player){
+    state.kills++;$('#kill-count').textContent=String(state.kills);state.player.kills++;
+    if(state.mode==='pvp')recordElimination(state,target.team);
+    const victim=target.type==='monster'?`${target.variant||'monster'} neutralized`:target.team?.toUpperCase()+' unit eliminated';
+    log(`${victim}.`,'good');announce(target.type==='monster'?`${(target.variant||'MONSTER').toUpperCase()} NEUTRALIZED`:'ENEMY ELIMINATED');
+  }else if(state.mode==='pvp')recordElimination(state,target.team);
+}
 function botCanSeeTarget(bot,target){
-  if(!target?.alive||target===bot||target.team===bot.team)return false;
-  return dist(bot,target)<=BOT_SIGHT_RANGE&&lineClear(bot,target);
+  return canSeeOpponent(state.world,bot,target,BOT_SIGHT_RANGE);
 }
-function botTargetScore(bot,target){
-  if(!botCanSeeTarget(bot,target))return-Infinity;
-  const attacker=target===bot.recentAttacker&&state.elapsed-(bot.attackedAt??-Infinity)<3;
-  const firing=firingLaneClear(bot,target);
-  return (firing?850:0)+(attacker?(firing?1800:250):0)-dist(bot,target);
-}
+function botTargetScore(bot,target){return scoreVisibleTarget(state.world,bot,target,BOT_SIGHT_RANGE,state.elapsed);}
 function botPatrolPoint(bot){
   const segments=state.world.corridors?.segments;
   if(segments?.length){const hall=choice(segments),x=Math.floor(rand(hall.x1,hall.x2+1)),y=Math.floor(rand(hall.y1,hall.y2+1));return{x:(x+.5)*32,y:(y+.5)*32};}
   return findOpen(bot.x/32,bot.y/32,3,12);
 }
-function weaponUtility(id,d){
-  const w=WEAPONS[id];if(!w)return 0;
-  if(w.kind==='melee')return d<w.range+32?120+w.damage*.45-w.rate*.025:0;
-  const effectiveRange=w.maxRange||[310,270,0,520][w.family];
-  if(w.maxRange&&d>w.maxRange)return 0;
-  const rangeFactor=d>effectiveRange?Math.max(.28,effectiveRange/d):1;
-  return w.damage*(w.pellets||1)*1000/w.rate*.55*rangeFactor+(w.tier||0)*14+w.magazine*.12;
-}
-function botWeaponScore(id,target,d,clear){const w=WEAPONS[id];if(!w)return-100;if(w.kind==='melee')return clear&&d<145?125+w.damage*.25:-35;if(!clear)return 2;return weaponUtility(id,d);}
-function botLoadoutValue(ids,engagementDistance){
-  const bestAt=d=>Math.max(0,...ids.map(id=>weaponUtility(id,d)));
-  return [70,145,280,430].reduce((sum,d)=>sum+bestAt(d),0)+(Number.isFinite(engagementDistance)?bestAt(engagementDistance)*.7:0);
-}
-function botWeaponPlan(bot,weaponId){
-  const candidate=WEAPONS[weaponId];if(!candidate||bot.inventory.includes(weaponId))return null;
-  if(bot.inventory.some(id=>typeof id==='number'&&WEAPONS[id].family===candidate.family&&(WEAPONS[id].tier||0)>(candidate.tier||0)))return null;
-  const owned=bot.inventory.filter(id=>typeof id==='number'),engagement=bot.target?.alive?dist(bot,bot.target):Infinity;
-  const baseline=botLoadoutValue(owned,engagement);let best=null;
-  const free=bot.inventory.findIndex(slot=>slot==null),slots=free>=0?[free]:bot.inventory.map((_,index)=>index);
-  for(const slot of slots){
-    const replaced=bot.inventory[slot];if(replaced!=null&&typeof replaced!=='number')continue;
-    const next=bot.inventory.map((id,index)=>index===slot?weaponId:id).filter(id=>typeof id==='number');
-    const gain=botLoadoutValue(next,engagement)-baseline;
-    if(gain>12&&(!best||gain>best.gain))best={slot,gain};
-  }
-  return best;
-}
-function botCanTakeLoot(bot,item){
-  if(item.type==='armor')return (bot.armor||0)<100;
-  if(item.type==='weapon'){
-    const plan=botWeaponPlan(bot,item.weapon);if(!plan)return false;
-    bot.lootJudgments??=new WeakMap();
-    const loadout=bot.inventory.map(slot=>typeof slot==='number'?slot:slot?.item||'-').join(',');
-    let judgment=bot.lootJudgments.get(item);
-    if(!judgment||judgment.loadout!==loadout){
-      const chance=plan.gain>=110?1:plan.gain>=45?.87:.68;
-      judgment={loadout,accept:(bot.pickupRoll?.()??Math.random())<chance};bot.lootJudgments.set(item,judgment);
-    }
-    return judgment.accept;
-  }
-  if(item.type==='health'||item.type==='grenade')return bot.inventory.some(slot=>slot?.item===item.type||slot==null);
-  return false;
-}
+function botWeaponScore(id,target,d,clear){return scoreBotWeapon(id,target,d,clear);}
+function botWeaponPlan(bot,weaponId){return planBotWeapon(bot,weaponId);}
+function botCanTakeLoot(bot,item){return botAcceptsLoot(bot,item,Math.random);}
 function botPickupLoot(bot){
-  const item=state.loot.find(l=>dist(bot,l)<20&&botCanTakeLoot(bot,l));
+  const item=state.loot.find(loot=>dist(bot,loot)<20&&botCanTakeLoot(bot,loot));
   if(!item)return;
   bot.pickedSlots??=[false,false,false,false];
-  if(item.type==='armor'){bot.armor=Math.min(100,(bot.armor||0)+50);bot.pickedArmor=true;takeLoot(item);return;}
-  if(item.type==='health'||item.type==='grenade'){
-    const existing=bot.inventory.findIndex(slot=>slot?.item===item.type),slot=existing>=0?existing:bot.inventory.findIndex(value=>value==null);
-    if(existing>=0)bot.inventory[slot].count+=item.count||1;else bot.inventory[slot]={item:item.type,count:item.count||1};
-    bot.pickedSlots[slot]=true;takeLoot(item);return;
-  }
-  const slot=botWeaponPlan(bot,item.weapon).slot,old=bot.inventory[slot];
-  if(old!=null)state.loot.push(dropInventorySlot(old,bot,slot*2));
-  bot.inventory[slot]=item.weapon;bot.ammo[item.weapon]=WEAPONS[item.weapon].magazine||0;bot.pickedSlots[slot]=true;takeLoot(item);
+  const slot=item.type==='weapon'?botWeaponPlan(bot,item.weapon)?.slot:null;
+  const result=collectInventoryItem(bot,item,slot);
+  if(!result.collected)return;
+  if(result.replaced!=null)state.loot.push(dropInventorySlot(result.replaced,bot,result.slot*2));
+  if(item.type==='armor')bot.pickedArmor=true;
+  else bot.pickedSlots[result.slot]=true;
+  takeLoot(item);
 }
 function botUseMedkit(bot){
   if(bot.hp>55)return;
   const slot=bot.inventory.findIndex(value=>value?.item==='health');
-  if(slot<0)return;
-  bot.hp=Math.min(bot.maxHp,bot.hp+45);bot.inventory[slot].count--;
-  if(bot.inventory[slot].count<=0){bot.inventory[slot]=null;bot.pickedSlots[slot]=false;}
+  if(slot<0||!healWithMedkit(bot,slot))return;
   burst(bot.x,bot.y,'#90d485',8);
 }
 function updateBot(bot,dt,now){
-  if(bot.invuln>0)bot.invuln=Math.max(0,bot.invuln-dt);
-  if(bot.hitFlash>0)bot.hitFlash-=dt;
-  if(state.mode==='pvp')setDoorOpen(nearbyDoor(bot,37,true),true,bot);
-  bot.think-=dt;botPickupLoot(bot);botUseMedkit(bot);
-  if(bot.think<=0){
-    bot.think=rand(.24,.4);
-    const enemies=[...state.bots,state.player].filter(other=>botCanSeeTarget(bot,other));
-    bot.target=enemies.sort((a,b)=>botTargetScore(bot,b)-botTargetScore(bot,a))[0]||null;
-    bot.pathPoint=bot.target?nextPathStep(bot,bot.target):null;
-    const nearest=state.loot.filter(item=>dist(bot,item)<145&&lineClear(bot,item)&&botCanTakeLoot(bot,item)).sort((a,b)=>dist(bot,a)-dist(bot,b))[0];
-    const targetDistance=bot.target?dist(bot,bot.target):Infinity;
-    const underFire=bot.recentAttacker?.alive&&state.elapsed-(bot.attackedAt??-Infinity)<3;
-    bot.pickupTarget=!underFire&&nearest&&targetDistance>185?nearest:null;
-    bot.pickupPath=bot.pickupTarget?nextPathStep(bot,bot.pickupTarget):null;
-    if(!bot.target&&!bot.pickupTarget&&(!bot.patrolTarget||dist(bot,bot.patrolTarget)<28||now>=(bot.patrolUntil||0))){bot.patrolTarget=botPatrolPoint(bot);bot.patrolUntil=now+rand(20000,32000);}
-    bot.patrolPath=bot.patrolTarget&&!bot.target&&!bot.pickupTarget?nextPathStep(bot,bot.patrolTarget):null;
-  }
-  if(bot.target&&!botCanSeeTarget(bot,bot.target)){bot.target=null;bot.pathPoint=null;bot.think=0;}
-  if(bot.target?.alive){
-    const d=dist(bot,bot.target),angle=Math.atan2(bot.target.y-bot.y,bot.target.x-bot.x),clear=lineClear(bot,bot.target);
-    bot.angle=angle;
-    const available=bot.inventory.map((id,index)=>({id,index,score:typeof id==='number'?botWeaponScore(id,bot.target,d,clear):-100})).sort((a,b)=>b.score-a.score);
-    if(available.length&&available[0].score>-20)bot.active=available[0].index;
-    const weapon=WEAPONS[bot.inventory[bot.active]],melee=weapon?.kind==='melee',reach=melee?weapon.range+bot.r:weapon?.maxRange||470;
-    if(bot.pickupTarget&&state.loot.includes(bot.pickupTarget))steerToward(bot,bot.pickupTarget,bot.pickupPath,bot.speed,dt);
-    else if(melee&&(d>reach-4||!clear))steerToward(bot,bot.target,bot.pathPoint,bot.speed,dt);
-    else if(!melee&&(d>145||!firingLaneClear(bot,bot.target)))steerToward(bot,bot.target,bot.pathPoint,bot.speed,dt,true);
-    else if(!melee&&d<95)move(bot,-Math.cos(angle)*bot.speed*.4*dt,-Math.sin(angle)*bot.speed*.4*dt);
-    if(now>bot.fireTime&&d<reach&&(melee?clear:firingLaneClear(bot,bot.target))){
-      if(Math.random()<.78)shoot(bot,angle,now);else bot.fireTime=now+rand(200,450);
-    }
-  }else if(bot.pickupTarget&&state.loot.includes(bot.pickupTarget))steerToward(bot,bot.pickupTarget,bot.pickupPath,bot.speed,dt);
-  else if(bot.patrolTarget)steerToward(bot,bot.patrolTarget,bot.patrolPath,bot.speed*.75,dt);
+  updateArenaBot(state,bot,dt,now,{
+    random:Math.random,
+    openNearbyDoor:actor=>{if(state.mode==='pvp')setDoorOpen(nearbyDoor(actor,37,true),true,actor);},
+    pickupLoot:botPickupLoot,
+    useMedkit:botUseMedkit,
+    canTakeLoot:botCanTakeLoot,
+    findPatrolPoint:botPatrolPoint,
+    shoot,
+  });
 }
 function wanderEnemy(e,dt,now){if(!Number.isFinite(e.wanderAngle)||now>=(e.wanderUntil||0)){e.wanderAngle=rand(-Math.PI,Math.PI);e.wanderUntil=now+rand(800,1600);}move(e,Math.cos(e.wanderAngle)*e.speed*.35*dt,Math.sin(e.wanderAngle)*e.speed*.35*dt);}
 function updateEnemy(e,dt,now){if(e.invuln>0)e.invuln=Math.max(0,e.invuln-dt);if(e.hitFlash>0)e.hitFlash-=dt;e.think-=dt;if(e.think<=0){e.think=rand(.24,.4);const friendlyGuard=e.type==='guard'&&e.team===state.player.team,range=friendlyGuard?BOT_SIGHT_RANGE:PLAYER_SIGHT_RANGE;let targets=e.type==='monster'?state.enemies.filter(x=>x.alive&&x.type==='guard'&&x.team===state.player.team):state.enemies.filter(x=>x.alive&&x.type==='monster');if(!friendlyGuard&&canSeePlayer(e))targets.push(state.player);if(state.mode==='pvp')targets.push(...state.bots.filter(b=>b.alive&&(!e.team||b.team!==e.team)));e.target=targets.filter(x=>x!==e&&dist(e,x)<=range&&lineClear(e,x)).sort((a,b)=>dist(e,a)-dist(e,b))[0]||null;e.pathPoint=e.target?nextPathStep(e,e.target):null;}if(e.target&&(dist(e,e.target)>(e.type==='guard'?BOT_SIGHT_RANGE:PLAYER_SIGHT_RANGE)||!lineClear(e,e.target)))e.target=null;if(!e.target?.alive){wanderEnemy(e,dt,now);return;}const d=dist(e,e.target),a=Math.atan2(e.target.y-e.y,e.target.x-e.x);e.angle=a;if(e.type==='guard'){if(d>210||!firingLaneClear(e,e.target))steerToward(e,e.target,e.pathPoint,e.speed,dt,true);else if(d<140)move(e,-Math.cos(a)*e.speed*.35*dt,-Math.sin(a)*e.speed*.35*dt);if(now>e.fireTime&&d<460&&firingLaneClear(e,e.target)){state.bullets.push({x:e.x+Math.cos(a)*14,y:e.y+Math.sin(a)*14,vx:Math.cos(a)*445,vy:Math.sin(a)*445,owner:e,damage:e.damage,life:1.25,color:'#f2745e'});e.fireTime=now+rand(700,1050);}}
   else if(e.variant==='spitter'){if(d>250||!firingLaneClear(e,e.target))steerToward(e,e.target,e.pathPoint,e.speed,dt);else if(d<155)move(e,-Math.cos(a)*e.speed*.35*dt,-Math.sin(a)*e.speed*.35*dt);if(now>e.fireTime&&d<390&&firingLaneClear(e,e.target)){state.bullets.push({x:e.x+Math.cos(a)*14,y:e.y+Math.sin(a)*14,vx:Math.cos(a)*310,vy:Math.sin(a)*310,owner:e,damage:e.damage,life:1.35,color:'#91d56e',acid:true});e.fireTime=now+1050;}}
   else if(d>e.r+e.target.r+6)steerToward(e,e.target,e.pathPoint,e.speed,dt);else if(now>e.fireTime){hit(e.target,e.damage,e);e.fireTime=now+(e.variant==='brute'?920:650);burst(e.target.x,e.target.y,e.variant==='spitter'?'#91d56e':'#f2745e',5);}}
-function lineClear(a,b,radius=7){const d=dist(a,b),steps=Math.ceil(d/6);for(let i=1;i<steps;i++){const t=i/steps;if(blocked(a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t,radius))return false;}return true;}
+function lineClear(a,b,radius=7){return hasLineOfSight(state.world,a,b,radius);}
 function canSeePlayer(actor){return state.player?.alive&&dist(actor,state.player)<=PLAYER_SIGHT_RANGE&&lineClear(actor,state.player);}
-function firingLaneClear(actor,target){if(!lineClear(actor,target))return false;const angle=Math.atan2(target.y-actor.y,target.x-actor.x),muzzle={x:actor.x+Math.cos(angle)*18,y:actor.y+Math.sin(angle)*18};return !blocked(muzzle.x,muzzle.y,2)&&lineClear(muzzle,target,2);}
-function nextPathStep(actor,target){const w=state.world.w,h=state.world.h,toIndex=(x,y)=>y*w+x;let sx=clamp(Math.floor(actor.x/32),1,w-2),sy=clamp(Math.floor(actor.y/32),1,h-2),gx=clamp(Math.floor(target.x/32),1,w-2),gy=clamp(Math.floor(target.y/32),1,h-2);if(!floorTile(gx,gy)){let found=false;for(let radius=1;radius<=3&&!found;radius++)for(let y=gy-radius;y<=gy+radius&&!found;y++)for(let x=gx-radius;x<=gx+radius;x++)if(floorTile(x,y)){gx=x;gy=y;found=true;break;}if(!found)return target;}const start=toIndex(sx,sy),goal=toIndex(gx,gy),parents=new Int32Array(w*h).fill(-2),queue=new Int32Array(w*h);let head=0,tail=0;queue[tail++]=start;parents[start]=start;const dirs=[[1,0],[-1,0],[0,1],[0,-1]];while(head<tail&&parents[goal]===-2){const here=queue[head++],x=here%w,y=Math.floor(here/w);for(const[dx,dy]of dirs){const nx=x+dx,ny=y+dy,next=toIndex(nx,ny);if(nx<1||ny<1||nx>=w-1||ny>=h-1||parents[next]!==-2||!floorTile(nx,ny))continue;parents[next]=here;queue[tail++]=next;}}if(parents[goal]===-2)return target;let step=goal;while(parents[step]!==start&&step!==start)step=parents[step];return{x:(step%w+.5)*32,y:(Math.floor(step/w)+.5)*32};}
-function steerToward(actor,target,pathPoint,speed,dt,requireLane=false){
-  const clear=lineClear(actor,target,Math.max(7,(actor.r||8)-1))&&(!requireLane||firingLaneClear(actor,target));
-  if(!clear&&pathPoint&&dist(actor,pathPoint)<12){actor.think=0;pathPoint=nextPathStep(actor,target);if(target===actor.target)actor.pathPoint=pathPoint;else if(target===actor.pickupTarget)actor.pickupPath=pathPoint;}
-  const point=clear?target:pathPoint||target,dx=point.x-actor.x,dy=point.y-actor.y,d=Math.hypot(dx,dy),beforeX=actor.x,beforeY=actor.y;
-  if(d>5)move(actor,dx/d*speed*dt,dy/d*speed*dt);
-  if(!clear&&Math.hypot(actor.x-beforeX,actor.y-beforeY)<.15){actor.stuckTime=(actor.stuckTime||0)+dt;if(actor.stuckTime>.35){const side=actor.stuckSide||1,nx=-dy/(d||1)*speed*dt*1.8*side,ny=dx/(d||1)*speed*dt*1.8*side;move(actor,nx,ny);if(Math.hypot(actor.x-beforeX,actor.y-beforeY)<.15){move(actor,-nx,-ny);actor.stuckSide=-side;}actor.stuckTime=0;actor.think=0;}}else actor.stuckTime=0;
-}
+function firingLaneClear(actor,target){return canFireAt(state.world,actor,target);}
+function nextPathStep(actor,target){return findPathStep(state.world,actor,target);}
+function steerToward(actor,target,pathPoint,speed,dt,requireLane=false){steerActor(state.world,actor,target,pathPoint,speed,dt,requireLane);}
 function respawnBot(b){const zone=state.world.spawnZones[b.team==='blue'?0:1],p=findOpen(zone.x/32,zone.y/32,0,5),kit=arenaStarterKit();b.x=p.x;b.y=p.y;b.hp=100;b.armor=25;b.alive=true;b.invuln=.55;b.respawn=0;b.inventory=kit.inventory;b.ammo=kit.ammo;b.pickedSlots=[false,false,false,false];b.pickedArmor=false;b.active=kit.active;b.target=null;b.recentAttacker=null;b.pathPoint=null;b.patrolTarget=null;b.lootJudgments=new WeakMap();b.think=0;b.fireTime=performance.now()+500;}
 function respawnPlayer(){const p=state.player,zone=state.world.spawnZones[p.team==='blue'?0:1],pos=findOpen(zone.x/32,zone.y/32,0,5),kit=arenaStarterKit();p.x=pos.x;p.y=pos.y;p.hp=100;p.armor=25;p.alive=true;p.invuln=.65;p.respawn=0;p.inventory=kit.inventory;p.ammo=kit.ammo;p.active=kit.active;p.starterWeapon=kit.inventory[1];announce('OPERATOR BACK IN THE FIGHT');renderWeapons();}
 function burst(x,y,color,n){for(let i=0;i<n;i++)state.particles.push({x,y,vx:rand(-95,95),vy:rand(-95,95),life:rand(.12,.42),max:.42,color,r:rand(1,3)});}
 function muzzle(x,y,color){for(let i=0;i<3;i++)state.particles.push({x,y,vx:rand(-30,30),vy:rand(-30,30),life:.07,max:.07,color,r:rand(2,4)});}
-function useGrenade(aimAngle=null){const p=state.player;if(!p?.alive){announce('NO GRENADES');return;}const index=p.inventory.findIndex(slot=>slot?.item==='grenade');if(index<0){announce('NO GRENADES');return;}const stack=p.inventory[index];stack.count--;if(stack.count<=0)p.inventory[index]=null;p.fireAt=performance.now()+360;$('#grenade-count').textContent=String(inventoryGrenades());renderWeapons();const tx=state.mouse.x+state.camera.x,ty=state.mouse.y+state.camera.y,angle=aimAngle??Math.atan2(ty-p.y,tx-p.x);const x=p.x+Math.cos(angle)*GRENADE_THROW_DISTANCE,y=p.y+Math.sin(angle)*GRENADE_THROW_DISTANCE;state.particles.push({x,y,vx:0,vy:0,life:.45,max:.45,color:'#dd8e68',r:9,grenade:true});const runId=state.runId;setTimeout(()=>{if(!state.running||runId!==state.runId)return;burst(x,y,'#e78e62',23);for(const t of state.mode==='pvp'?state.bots:state.enemies)if(t.alive&&dist({x,y},t)<112)hit(t,115*(1-dist({x,y},t)/180),p);sound(80,'sawtooth',.25,.065);},450);sound(110,'triangle',.09,.02);}
-function interact(){const p=state.player;if(!state.running||state.paused||!p?.alive)return;const action=nearbyInteraction();if(!action){announce('NOTHING IN REACH');return;}if(action.type==='exit'){finish(true,'EXTRACTION CONFIRMED','You reached the extraction zone.');return;}if(action.type==='door'){setDoorOpen(action.door,!action.door.open,p);return;}const item=action.item;if(item.type==='weapon'){const slot=p.inventory.findIndex(value=>value==null);if(slot>=0){p.inventory[slot]=item.weapon;p.ammo[item.weapon]=WEAPONS[item.weapon].magazine;takeLoot(item);p.active=slot;log(`${item.label} added to slot ${slot+1}.`,'good');announce(`${item.label} COLLECTED`);}else{state.pendingLoot=item;$('#inventory-prompt').textContent=`${item.label} FOUND — SELECT A SLOT BELOW TO SWAP`;$('#inventory-prompt').classList.remove('hidden');announce(`${item.label} READY TO EQUIP`);renderWeapons();return;}}else if(item.type==='health'||item.type==='grenade'){const slotType=item.type==='health'?'health':'grenade',existing=p.inventory.findIndex(value=>value?.item===slotType),free=p.inventory.findIndex(value=>value==null);if(existing>=0){p.inventory[existing].count+=(item.count||1);}else if(free>=0){p.inventory[free]={item:slotType,count:item.count||1};p.active=free;}else{state.pendingLoot=item;$('#inventory-prompt').textContent=`${item.label} FOUND — SELECT A SLOT BELOW TO SWAP`;$('#inventory-prompt').classList.remove('hidden');announce(`${item.label} NEEDS AN INVENTORY SLOT`);renderWeapons();return;}takeLoot(item);announce(`${item.label} ADDED TO INVENTORY`);log(`${inventoryItemLabel({item:slotType})} stored in inventory.`,'good');}else if(item.type==='armor'){p.armor=Math.min(100,p.armor+50);log('Armor equipped.','good');}takeLoot(item);state.found++;$('#loot-count').textContent=String(state.found);if(item.type==='armor')announce(`${item.label} COLLECTED`);sound(500,'sine',.08,.018);$('#grenade-count').textContent=String(inventoryGrenades());renderWeapons();}
+function useGrenade(aimAngle=null){const p=state.player;if(!p?.alive){announce('NO GRENADES');return;}const index=p.inventory.findIndex(slot=>slot?.item==='grenade');if(index<0){announce('NO GRENADES');return;}consumeInventoryItem(p,'grenade',index);p.fireAt=performance.now()+360;$('#grenade-count').textContent=String(inventoryGrenades());renderWeapons();const tx=state.mouse.x+state.camera.x,ty=state.mouse.y+state.camera.y,angle=aimAngle??Math.atan2(ty-p.y,tx-p.x);const x=p.x+Math.cos(angle)*GRENADE_THROW_DISTANCE,y=p.y+Math.sin(angle)*GRENADE_THROW_DISTANCE;state.particles.push({x,y,vx:0,vy:0,life:.45,max:.45,color:'#dd8e68',r:9,grenade:true});const runId=state.runId;setTimeout(()=>{if(!state.running||runId!==state.runId)return;burst(x,y,'#e78e62',23);for(const t of state.mode==='pvp'?state.bots:state.enemies)if(t.alive&&dist({x,y},t)<112)hit(t,115*(1-dist({x,y},t)/180),p);sound(80,'sawtooth',.25,.065);},450);sound(110,'triangle',.09,.02);}
+function interact(){
+  const p=state.player;
+  if(!state.running||state.paused||!p?.alive)return;
+  const action=nearbyInteraction();
+  if(!action){announce('NOTHING IN REACH');return;}
+  if(action.type==='exit'){finish(true,'EXTRACTION CONFIRMED','You reached the extraction zone.');return;}
+  if(action.type==='door'){setDoorOpen(action.door,!action.door.open,p);return;}
+  const item=action.item,result=collectInventoryItem(p,item);
+  if(!result.collected){
+    state.pendingLoot=item;
+    $('#inventory-prompt').textContent=`${item.label} FOUND — SELECT A SLOT BELOW TO SWAP`;
+    $('#inventory-prompt').classList.remove('hidden');
+    announce(item.type==='weapon'?`${item.label} READY TO EQUIP`:`${item.label} NEEDS AN INVENTORY SLOT`);
+    renderWeapons();return;
+  }
+  takeLoot(item);
+  if(item.type==='weapon'){
+    p.active=result.slot;log(`${item.label} added to slot ${result.slot+1}.`,'good');announce(`${item.label} COLLECTED`);
+  }else if(item.type==='health'||item.type==='grenade'){
+    if(!result.stacked)p.active=result.slot;
+    announce(`${item.label} ADDED TO INVENTORY`);log(`${inventoryItemLabel({item:item.type})} stored in inventory.`,'good');
+  }else if(item.type==='armor'){
+    log('Armor equipped.','good');announce(`${item.label} COLLECTED`);
+  }
+  state.found++;$('#loot-count').textContent=String(state.found);
+  sound(500,'sine',.08,.018);$('#grenade-count').textContent=String(inventoryGrenades());renderWeapons();
+}
 function finish(won,title,copy){if(state.roundEnd)return;state.roundEnd=true;state.running=false;$('#result-title').innerHTML=title.replace(' ','<br>');$('#result-copy').textContent=copy;$('#result-eyebrow').textContent=won?'OPERATION COMPLETE':'OPERATION FAILED';$('#end-overlay').classList.remove('hidden');}
 function togglePause(){if(!state.running)return;state.paused=!state.paused;$('#pause-overlay').classList.toggle('hidden',!state.paused);game.classList.toggle('paused',state.paused);if(!state.paused)state.lastTime=performance.now();}
 function updateHUD(){

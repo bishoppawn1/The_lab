@@ -2,9 +2,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import vm from 'node:vm';
+import * as arenaCore from '../src/arena-core.js';
+import * as facility from '../src/facility.js';
 
 const source = readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
-const definitions = source.slice(0, source.indexOf("$('#select-survival').addEventListener"));
+const script = source.replace(/^import[^\n]*\n/gm, '');
+const definitions = script.slice(0, script.indexOf("$('#select-survival').addEventListener"));
 function fixture(mode = 'survival') {
   const elements = new Map();
   const element = selector => {
@@ -16,7 +19,7 @@ function fixture(mode = 'survival') {
     });
     return elements.get(selector);
   };
-  const context = { document: { querySelector: element, createElement: () => element('log') }, performance: { now: () => 1000 } };
+  const context = { ...arenaCore, ...facility, scoreBotWeapon: arenaCore.botWeaponScore, planBotWeapon: arenaCore.botWeaponPlan, botAcceptsLoot: arenaCore.botCanTakeLoot, document: { querySelector: element, createElement: () => element('log') }, performance: { now: () => 1000 } };
   vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, setDoorOpen, nearbyDoor, nearbyInteraction, updateVision, blocked, lineClear, advanceBullet, interact, onKeyDown, updateHUD };`, context);
   const lab = context.lab, { state } = lab;
   const w = 50, h = 50;

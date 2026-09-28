@@ -45,8 +45,11 @@ The build writes a static copy to `dist/` and adds cache-busting versions to loc
 
 - `index.html` — operation selection, setup, and game interface
 - `styles.css` — responsive dark interface
-- `src/app.js` — maps, input, combat, AI, and rendering
+- `src/facility.js` — seeded, browser-independent facility generator; `createFacility('pvp', seed)` recreates the same layout and returns its seed in `world.seed`
+- `src/arena-core.js` — shared weapon and loot data, inventory, bot decisions and pathfinding, movement, doors, vision, damage, projectiles, and scoring
+- `src/app.js` — local match orchestration, browser callbacks, input, sound, UI, and rendering; it uses the shared modules above
+- `test/arena-core.test.js` — runs shared map and arena rules directly in Node, without a browser
 - `scripts/build.js` — static Pages build
 - `.github/workflows/pages.yml` — GitHub Pages deployment workflow
 
-This game is a single-player browser simulation. Its PvP mode uses AI opponents and teammates; it does not connect players over a network.
+This game is currently a single-player browser simulation. Its PvP mode uses AI opponents and teammates; it does not connect players over a network. The shared rules and map seed are the first step toward an authoritative multiplayer match server.

@@ -2,13 +2,17 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import vm from 'node:vm';
+import * as arenaCore from '../src/arena-core.js';
+import * as facility from '../src/facility.js';
 
 const source = readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
-const definitions = source.slice(0, source.indexOf("$('#select-survival').addEventListener"));
+const script = source.replace(/^import[^\n]*\n/gm, '');
+const definitions = script.slice(0, script.indexOf("$('#select-survival').addEventListener"));
+const imports = { ...arenaCore, ...facility, scoreBotWeapon: arenaCore.botWeaponScore, planBotWeapon: arenaCore.botWeaponPlan, botAcceptsLoot: arenaCore.botCanTakeLoot };
 
 function loadGameLogic(random) {
   const element = { getContext: () => ({}), classList: { add() {}, remove() {} }, appendChild() {}, addEventListener() {}, setAttribute() {}, dataset: {}, style: {} };
-  const context = { document: { querySelector: () => element, createElement: () => ({ ...element, dataset: {} }) }, performance: { now: () => 1000 } };
+  const context = { ...imports, document: { querySelector: () => element, createElement: () => ({ ...element, dataset: {} }) }, performance: { now: () => 1000 } };
   if (random) context.Math = Object.assign(Object.create(Math), { random });
   vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, WEAPONS, generateWorld, spawnLoot, takeLoot, respawnLoot, spawnAmbientLoot, updateLootSpawns, buildPlayer, dropPlayerLoadout, respawnPlayer, spawnBot, respawnBot, blocked, lineClear, interact, setDoorOpen, updateVision, seedRoomThreats, spawnEnemy, firingLaneClear, botCanSeeTarget, botPatrolPoint, updateBot, updateEnemy, botCanTakeLoot, botPickupLoot, unitVisibleToTeam, hit, shoot, advanceBullet };`, context);
   return context.lab;
@@ -370,7 +374,7 @@ test('opening another operation after a result hides the old game and result', (
     }
     return elements.get(id);
   };
-  const context = { document: { querySelector: element } };
+  const context = { ...imports, document: { querySelector: element } };
   vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, finish, showMenu, openSetup };`, context);
   const { state, finish, showMenu, openSetup } = context.lab;
   state.running = true;
@@ -711,7 +715,7 @@ test('melee rendering sweeps the weapon through different angles', () => {
     get(target, key) { return key in target ? target[key] : (...args) => { if (key === 'rotate') rotations.push(args[0]); }; },
     set(target, key, value) { target[key] = value; return true; },
   });
-  const context = { document: { querySelector: () => ({ getContext: () => context2d }) } };
+  const context = { ...imports, document: { querySelector: () => ({ getContext: () => context2d }) } };
   vm.runInNewContext(`${definitions}\nglobalThis.lab = { state, drawEntity };`, context);
   const { state, drawEntity } = context.lab;
   state.camera = { x: 0, y: 0 };

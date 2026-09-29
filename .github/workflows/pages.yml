@@ -25,6 +25,8 @@ jobs:
         with:
           node-version: 22
       - name: Run checks and build
+        env:
+          PUBLIC_ROOM_SERVER_URL: ${{ vars.PUBLIC_ROOM_SERVER_URL }}
         run: npm ci && npm test && npm run build
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

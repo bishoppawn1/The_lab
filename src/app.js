@@ -33,6 +33,17 @@ function usesLocalRooms(){
   const {hostname,protocol}=window.location;
   return protocol==='http:'&&(/^(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)$/.test(hostname)||hostname.endsWith('.local'));
 }
+function roomServiceBase(){
+  if(typeof window==='undefined')return null;
+  const configured=window.THE_LAB_ROOM_SERVER_URL?.trim();
+  if(configured){
+    try{
+      const url=new URL(configured);
+      if(url.protocol==='https:')return url.origin;
+    }catch{}
+  }
+  return usesLocalRooms()?window.location.origin:null;
+}
 function showMenu(){closeRemoteMatch();state.running=false;state.paused=false;state.runId++;clearOperationUi();menu.classList.remove('hidden');setup.classList.add('hidden');game.classList.add('hidden');}
 function openSetup(mode){
   closeRemoteMatch();state.running=false;state.paused=false;state.runId++;clearOperationUi();
@@ -43,10 +54,10 @@ function openSetup(mode){
   $('#setup-subtitle').textContent=mode==='survival'?'Explore the facility, gather supplies, and reach extraction.':'Choose a team size and take your squad into the arena.';
   const survivalOptions=`<div class="config-label">FACILITY CONDITIONS</div><div class="choice-row" id="difficulty-row"><button class="choice selected" data-value="standard">STANDARD</button><button class="choice" data-value="survival">HARDCORE</button><button class="choice" data-value="training">TRAINING</button></div><div class="config-label">FIELD KIT</div><div class="choice-row" id="loadout-row"><button class="choice selected" data-value="balanced">BALANCED</button><button class="choice" data-value="assault">ASSAULT</button><button class="choice" data-value="medic">MEDIC</button></div>`;
   const pvpOptions=`<div class="config-label">TEAM SIZE · AI FILL ${state.botFill?'ON':'OFF'}</div><div class="choice-row" id="size-row"><button class="choice selected" data-value="5">5 VS 5</button><button class="choice" data-value="10">10 VS 10</button></div><div class="config-label">YOUR TEAM</div><div class="choice-row" id="team-row"><button class="choice selected" data-value="blue">BLUE TEAM</button><button class="choice" data-value="red">RED TEAM</button></div><div class="config-label">MATCH TARGET</div><div class="choice-row" id="target-row"><button class="choice selected" data-value="50">FIRST TO 50</button><button class="choice" data-value="100">FIRST TO 100</button><button class="choice" data-value="250">FIRST TO 250</button></div>`;
-  const localRoom=mode==='pvp'&&usesLocalRooms();
-  const roomOptions=`<div class="config-label">DEV MATCH ROOM</div><div class="choice-row" id="room-row"><button class="choice selected" data-value="create">CREATE ROOM</button><button class="choice" data-value="join">JOIN WITH CODE</button></div><label class="config-label room-code-label hidden" for="room-code-input">ROOM CODE</label><input id="room-code-input" class="room-code-input hidden" maxlength="6" autocomplete="off" spellcheck="false" placeholder="ENTER 6-CHARACTER CODE"><p class="room-help">Rooms on this local preview are available only to browsers that can reach this computer.</p>`;
-  $('#setup-options').innerHTML=mode==='survival'?survivalOptions:pvpOptions+(localRoom?roomOptions:'');
-  $('#start-button').innerHTML=`${mode==='survival'?'BEGIN OPERATION':localRoom?'CREATE ROOM':'ENTER ARENA'} <span>→</span>`;
+  const roomBase=mode==='pvp'&&roomServiceBase();
+  const roomOptions=`<div class="config-label">${usesLocalRooms()?'DEV MATCH ROOM':'ONLINE MATCH ROOM'}</div><div class="choice-row" id="room-row"><button class="choice selected" data-value="create">CREATE ROOM</button><button class="choice" data-value="join">JOIN WITH CODE</button></div><label class="config-label room-code-label hidden" for="room-code-input">ROOM CODE</label><input id="room-code-input" class="room-code-input hidden" maxlength="6" autocomplete="off" spellcheck="false" placeholder="ENTER 6-CHARACTER CODE"><p class="room-help">${usesLocalRooms()?'Share this preview address and room code with someone who can reach this computer.':'Share the room code with anyone playing at the GitHub Pages link.'}</p>`;
+  $('#setup-options').innerHTML=mode==='survival'?survivalOptions:pvpOptions+(roomBase?roomOptions:'<p class="room-help">Online rooms are unavailable. You can still play against bots.</p>');
+  $('#start-button').innerHTML=`${mode==='survival'?'BEGIN OPERATION':roomBase?'CREATE ROOM':'ENTER BOT MATCH'} <span>→</span>`;
   setup.querySelectorAll('.choice-row').forEach(row=>row.addEventListener('click',e=>{
     const button=e.target.closest('.choice');if(!button)return;
     row.querySelectorAll('.choice').forEach(choice=>choice.classList.remove('selected'));
@@ -214,7 +225,7 @@ function renderRoomLobby(){
   const blue=data.players.filter(player=>player.team==='blue'),red=data.players.filter(player=>player.team==='red');
   const rows=(players,team)=>players.map(player=>`<div class="room-player"><span class="${team}-text">${team.toUpperCase()} ${player.id===room.welcome.id?'· YOU':''}${player.id===data.hostId?' · HOST':''}</span><b>${player.ready?'READY':'WAITING'}</b></div>`).join('');
   $('#setup-title').innerHTML='MATCH<br><span>LOBBY.</span>';
-  $('#setup-subtitle').textContent=`Room ${data.code} · ${data.teamSize}v${data.teamSize} · first to ${data.target}. Share the code with someone using this local preview.`;
+  $('#setup-subtitle').textContent=`Room ${data.code} · ${data.teamSize}v${data.teamSize} · first to ${data.target}. Share the code with another player.`;
   $('#setup-options').innerHTML=`<div class="config-label">ROOM CODE</div><div class="room-code-display" aria-label="Room code">${data.code}</div><div class="config-label">PLAYERS · BOTS FILL EMPTY SPOTS</div><div class="room-player-list">${rows(blue,'blue')}${rows(red,'red')}</div><button id="room-ready-button" class="choice room-ready-button ${self?.ready?'selected':''}" type="button">${self?.ready?'READY ✓':'READY UP'}</button><p class="room-help" id="room-lobby-message">${isHost?'When everyone is ready, start the match.':'Waiting for the host to start the match.'}</p>`;
   $('#room-ready-button').addEventListener('click',()=>room.socket.send(JSON.stringify({type:'lobby',action:'ready',ready:!self?.ready})));
   const canStart=isHost&&data.players.length>0&&data.players.every(player=>player.ready);
@@ -238,25 +249,27 @@ function startRoomMatch(snapshot){
 }
 async function startGame(){
   if(state.lobby){state.lobby.socket.send(JSON.stringify({type:'lobby',action:'start'}));return;}
-  if(state.mode!=='pvp'||!usesLocalRooms()){startLocalGame();return;}
+  const roomBase=state.mode==='pvp'&&roomServiceBase();
+  if(!roomBase){startLocalGame();return;}
   const runId=state.runId,button=$('#start-button'),original=button.innerHTML;
   button.disabled=true;button.textContent=state.roomAction==='join'?'JOINING ROOM…':'CREATING ROOM…';
   try{
     let code;
     if(state.roomAction==='create'){
-      const response=await fetch('./rooms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({teamSize:state.teamSize,target:state.settings.target})});
+      const response=await fetch(`${roomBase}/rooms`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({teamSize:state.teamSize,target:state.settings.target})});
       const result=await response.json();
       if(!response.ok)throw new Error(result.error||'Could not create room');
       code=result.code;
     }else{
       code=$('#room-code-input').value.trim().toUpperCase();
       if(!/^[A-Z2-9]{6}$/.test(code))throw new Error('Enter a six-character room code.');
-      const response=await fetch(`./rooms/${code}`);
+      const response=await fetch(`${roomBase}/rooms/${code}`);
       if(!response.ok)throw new Error('Room not found or already started.');
     }
     if(runId!==state.runId)return;
-    const protocol=window.location.protocol==='https:'?'wss:':'ws:';
-    const connection=await connectRoom(`${protocol}//${window.location.host}/rooms/${code}?team=${state.settings.team}`);
+    const roomUrl=new URL(roomBase);
+    roomUrl.protocol=roomUrl.protocol==='https:'?'wss:':'ws:';
+    const connection=await connectRoom(`${roomUrl.origin}/rooms/${code}?team=${state.settings.team}`);
     if(runId!==state.runId){connection.socket.close();return;}
     state.lobby={...connection,state:connection.lobby};
     connection.socket.onmessage=event=>{

@@ -1,0 +1,1 @@
+window.THE_LAB_ROOM_SERVER_URL='';

@@ -8,6 +8,10 @@ import { AuthoritativeMatch } from '../src/authoritative-match.js';
 const TICK_MS=1000/30;
 const SNAPSHOT_MS=100;
 const CODE_ALPHABET='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const MAX_ROOMS=16;
+const PAGE_ORIGIN='https://bishoppawn1.github.io';
+const localOrigin=origin=>/^http:\/\/(?:localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|[a-z0-9-]+\.local)(?::\d+)?$/.test(origin);
+const allowedOrigin=origin=>!origin||origin===PAGE_ORIGIN||localOrigin(origin)||process.env.ROOM_ALLOWED_ORIGINS?.split(',').map(value=>value.trim()).includes(origin);
 const json=(response,status,value)=>{
   response.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});
   response.end(JSON.stringify(value));
@@ -30,6 +34,7 @@ export function createRoomHub(server){
   const publishLobby=room=>broadcast(room,lobbyState(room));
 
   server.on('upgrade',(request,socket,head)=>{
+    if(!allowedOrigin(request.headers.origin)){socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');socket.destroy();return;}
     const path=new URL(request.url,'http://localhost').pathname;
     const code=/^\/rooms\/([A-Z2-9]{6})$/.exec(path)?.[1];
     const room=rooms.get(code);
@@ -68,7 +73,7 @@ export function createRoomHub(server){
     socket.on('close',()=>{
       room.clients.delete(socket);room.ready.delete(player.id);room.match.removePlayer(player.id);
       if(room.hostId===player.id)room.hostId=room.match.players.keys().next().value??null;
-      if(room.match.players.size&&!room.started)publishLobby(room);
+      if(room.match.players.size){if(!room.started)publishLobby(room);}
       else rooms.delete(room.code);
     });
     socket.on('error',()=>{});
@@ -93,8 +98,24 @@ export function createRoomHub(server){
     rooms,
     async handleRequest(request,response){
       const path=new URL(request.url,'http://localhost').pathname;
+      if(path==='/health'&&request.method==='GET'){
+        json(response,200,{status:'ok',rooms:rooms.size,players:[...rooms.values()].reduce((count,room)=>count+room.match.players.size,0)});
+        return true;
+      }
+      if(path==='/rooms'||path.startsWith('/rooms/')){
+        const origin=request.headers.origin;
+        if(!allowedOrigin(origin)){json(response,403,{error:'Origin not allowed'});return true;}
+        if(origin){
+          response.setHeader('Access-Control-Allow-Origin',origin);
+          response.setHeader('Vary','Origin');
+          response.setHeader('Access-Control-Allow-Methods','GET, POST, OPTIONS');
+          response.setHeader('Access-Control-Allow-Headers','Content-Type');
+        }
+        if(request.method==='OPTIONS'){response.writeHead(204).end();return true;}
+      }
       if(path==='/rooms'&&request.method==='POST'){
         try{
+          if(rooms.size>=MAX_ROOMS){json(response,503,{error:'Room server is full. Try again later.'});return true;}
           let body='';
           for await(const chunk of request){body+=chunk;if(body.length>1024)throw new Error('Request too large');}
           const {teamSize,target}=JSON.parse(body);
@@ -134,7 +155,7 @@ export async function startRoomServer({host='127.0.0.1',port=8787}={}){
 }
 
 if(process.argv[1]&&fileURLToPath(import.meta.url)===resolve(process.argv[1])){
-  const service=await startRoomServer({host:process.env.MATCH_HOST||'127.0.0.1',port:Number(process.env.MATCH_PORT)||8787});
+  const service=await startRoomServer({host:process.env.MATCH_HOST||(process.env.PORT?'0.0.0.0':'127.0.0.1'),port:Number(process.env.PORT||process.env.MATCH_PORT)||8787});
   console.log(`The Lab room server listening at http://${service.address.address}:${service.address.port}`);
   const shutdown=()=>service.close().then(()=>process.exit(0));
   process.once('SIGINT',shutdown);

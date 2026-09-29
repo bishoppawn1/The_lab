@@ -1,0 +1,9 @@
+services:
+  - type: web
+    runtime: node
+    name: bishoppawn1-the-lab-rooms
+    plan: free
+    region: virginia
+    buildCommand: npm ci
+    startCommand: npm run room-server
+    healthCheckPath: /health

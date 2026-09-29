@@ -63,9 +63,13 @@ for(const [name,start] of [['local preview',startPreviewServer],['standalone roo
       assert.equal(room.started,true);
       assert.equal((await fetch(`${base}/rooms/${first.code}`)).status,404,'started rooms reject new joins');
       assert.equal((service.roomHub?.rooms??service.hub.rooms).get(second.code).started,false,'other rooms remain in their own lobby');
-      const closed=clients.map(client=>once(client.socket,'close'));
-      red.socket.close();blue.socket.close();
-      await Promise.all(closed);
+      const redClosed=once(red.socket,'close');
+      red.socket.close();
+      await redClosed;
+      assert.equal((service.roomHub?.rooms??service.hub.rooms).has(first.code),true,'a running room survives a player leaving');
+      const blueClosed=once(blue.socket,'close');
+      blue.socket.close();
+      await blueClosed;
       for(let i=0;i<20&&(service.roomHub?.rooms??service.hub.rooms).has(first.code);i++)await new Promise(done=>setTimeout(done,10));
       assert.equal((service.roomHub?.rooms??service.hub.rooms).has(first.code),false,'empty rooms are removed');
     }finally{
@@ -91,4 +95,19 @@ test('a waiting room transfers host to the next player',async()=>{
     second.socket.terminate();
     await service.close();
   }
+});
+
+test('public room endpoints allow the Pages origin and reject other browser origins',async()=>{
+  const service=await startRoomServer({port:0});
+  const base=`http://127.0.0.1:${service.address.port}`;
+  try{
+    const health=await fetch(`${base}/health`).then(response=>response.json());
+    assert.equal(health.status,'ok');
+    const preflight=await fetch(`${base}/rooms`,{method:'OPTIONS',headers:{Origin:'https://bishoppawn1.github.io','Access-Control-Request-Method':'POST'}});
+    assert.equal(preflight.status,204);
+    assert.equal(preflight.headers.get('access-control-allow-origin'),'https://bishoppawn1.github.io');
+    const blocked=await fetch(`${base}/rooms`,{method:'POST',headers:{Origin:'https://unrelated.example','Content-Type':'application/json'},body:JSON.stringify({teamSize:5,target:50})});
+    assert.equal(blocked.status,403);
+    assert.equal(service.hub.rooms.size,0);
+  }finally{await service.close();}
 });

@@ -44,7 +44,7 @@ The build writes a static copy to `dist/` and adds cache-busting versions to loc
 
 ## Put multiplayer online
 
-The repo contains [render.yaml](render.yaml), a free Render web-service blueprint for the Node room server. [Deploy the blueprint to Render](https://render.com/deploy?repo=https://github.com/bishoppawn1/The_lab), then copy the deployed service's `https://...onrender.com` URL. In this GitHub repository, add an Actions variable named `PUBLIC_ROOM_SERVER_URL` containing that URL under **Settings → Secrets and variables → Actions → Variables**. Re-run the Pages workflow or push a commit. The Pages build then embeds the public server URL in `room-config.js`, and players opening the GitHub Pages game see **Create room** and **Join with code** automatically. The browser uses HTTPS for room requests and WSS for live matches.
+The repo contains [render.yaml](render.yaml), a free Render web-service blueprint for the Node room server. The deployed room server is at [bishoppawn1-the-lab-rooms.onrender.com](https://bishoppawn1-the-lab-rooms.onrender.com/health). The GitHub Pages workflow embeds this URL in `room-config.js`, so players opening the [GitHub Pages game](https://bishoppawn1.github.io/The_lab/) see **Create room** and **Join with code**. The browser uses HTTPS for room requests and WSS for live matches. If the room server moves, update `PUBLIC_ROOM_SERVER_URL` in `.github/workflows/pages.yml` and push a commit.
 
 The public server responds to `GET /health`; check that endpoint before sharing room codes. Render's free instance can sleep after 15 minutes of inactivity and takes time to wake. Rooms are held in memory, so a restart ends active rooms. The room server has a 16-room limit; a larger audience will need more capacity and persistent match coordination.
 
@@ -85,4 +85,4 @@ Movement axes are clamped to −1 through 1; `aim` is in radians; `slot` is 0–
 - `scripts/build.js` — static Pages build
 - `.github/workflows/pages.yml` — GitHub Pages deployment workflow
 
-GitHub Pages serves the static client. Its online-room controls appear only after `PUBLIC_ROOM_SERVER_URL` points to the deployed room service; without that variable, deathmatch still works as a bot match.
+GitHub Pages serves the static client. The Pages workflow sets `PUBLIC_ROOM_SERVER_URL` to the deployed room service; without a configured service, deathmatch still works as a bot match.

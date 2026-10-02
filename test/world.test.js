@@ -18,7 +18,7 @@ function loadGameLogic(random) {
   return context.lab;
 }
 
-function reachableTiles(world, start, respectDoors = false) {
+function reachableTiles(world, start, respectDoors = false, respectCover = false) {
   const key = (x, y) => `${x},${y}`;
   const queue = [[Math.floor(start.x / 32), Math.floor(start.y / 32)]];
   const seen = new Set([key(...queue[0])]);
@@ -26,7 +26,7 @@ function reachableTiles(world, start, respectDoors = false) {
     const [x, y] = queue[index];
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const nx = x + dx, ny = y + dy, next = key(nx, ny);
-      if (world.map[ny]?.[nx] !== 0 || seen.has(next) || respectDoors && world.doorTiles.get(next)?.open === false) continue;
+      if (world.map[ny]?.[nx] !== 0 || seen.has(next) || respectDoors && world.doorTiles.get(next)?.open === false || respectCover && arenaCore.isBlocked(world, (nx + .5) * 32, (ny + .5) * 32, 10)) continue;
       seen.add(next);
       queue.push([nx, ny]);
     }
@@ -58,8 +58,8 @@ test('generated rooms remain connected across different layouts', () => {
     assert.equal(world.w, 160);
     assert.equal(world.h, 116);
     assert.equal(world.rooms.length, 18);
-    assert.equal(world.doors.length, 18);
-    assert.equal(world.doors.filter(door => !door.open).length, 17);
+    assert.equal(world.doors.length, 17);
+    assert.equal(world.doors.filter(door => !door.open).length, 16);
     for (const hall of world.corridors.segments) {
       for (let y = hall.y1; y <= hall.y2; y++) for (let x = hall.x1; x <= hall.x2; x++) {
         assert.equal(world.map[y][x], 0, `corridor at ${x},${y} must stay open`);
@@ -74,19 +74,30 @@ test('generated rooms remain connected across different layouts', () => {
     assert.equal(world.rooms.at(-1).name, 'EXTRACTION BAY');
     assert.equal(new Set(world.rooms.map(room => room.name)).size, 18, 'every room theme should appear once');
     const hub = world.rooms.find(room => room.name === 'SUPPLY HUB');
-    assert.ok(hub.w * hub.h >= 400, 'the central cache should be larger than a standard room');
-    assert.ok(Math.hypot(hub.x + hub.w / 2 - world.w / 2, hub.y + hub.h / 2 - world.h / 2) < 30);
-    assert.ok(state.roomProps.every(prop => !(prop.x / 32 > hub.x && prop.x / 32 < hub.x + hub.w && prop.y / 32 > hub.y && prop.y / 32 < hub.y + hub.h)), 'the cache should remain open');
+    assert.ok(hub.w * hub.h >= 1200, 'the central cache should be a large arena');
+    assert.equal(hub.x + hub.w / 2, world.w / 2);
+    assert.equal(hub.y + hub.h / 2, world.h / 2);
+    const hubCover = state.roomProps.filter(prop => prop.roomName === 'SUPPLY HUB');
+    assert.ok(hubCover.length >= 12 && hubCover.every(prop => prop.solid), 'the cache should contain substantial solid cover');
+    assert.ok(hubCover.every(prop => Math.abs(Math.floor(prop.x / 32) - world.w / 2) >= 4 && Math.abs(Math.floor(prop.y / 32) - world.h / 2) >= 4), 'cover must leave wide crossing lanes');
     layouts.add(world.rooms.map(room => `${room.x},${room.y},${room.w},${room.h}`).join('|'));
     const reachable = reachableTiles(world, world.spawnZones[0]);
     for (const room of world.rooms) {
       const x = room.x + Math.floor(room.w / 2);
       const y = room.y + Math.floor(room.h / 2);
       assert.ok(reachable.has(`${x},${y}`), `${room.name} must be reachable`);
-      assert.equal(roomExits(world, room), 1, `${room.name} should connect through exactly one door`);
+      assert.equal(roomExits(world, room), room === hub ? 4 : 1, `${room.name} should have its expected entrances`);
     }
     assert.equal(reachable.size, world.map.flat().filter(tile => tile === 0).length, 'every floor tile must be reachable when doors are open');
     const accessible = reachableTiles(world, world.spawnZones[0], true);
+    assert.ok(accessible.has(`${world.w / 2},${world.h / 2}`), 'the hub stays reachable with other rooms closed');
+    if (run < 30) {
+      const midX = hub.x + hub.w / 2, midY = hub.y + hub.h / 2;
+      const walking = reachableTiles(world, { x: (midX + .5) * 32, y: (midY + .5) * 32 }, true, true);
+      for (const [x, y] of [[midX, hub.y - 2], [midX, hub.y + hub.h + 1], [hub.x - 2, midY], [hub.x + hub.w + 1, midY]]) {
+        assert.ok(walking.has(`${x},${y}`), `cover must leave the ${x},${y} entrance walkable`);
+      }
+    }
     for (const door of world.doors) {
       const outside = `${Math.floor(door.approach.x / 32)},${Math.floor(door.approach.y / 32)}`;
       assert.ok(accessible.has(outside), 'every door must be approachable without crossing another closed room');
@@ -180,10 +191,11 @@ test('deathmatch bots roll varied starter weapons on spawn and respawn', () => {
   state.enemies = [];
   for (let i = 0; i < 24; i++) spawnBot(i % 2 ? 'red' : 'blue', i);
   const starters = new Set(state.bots.map(bot => bot.inventory[1]));
-  assert.ok(starters.size >= 5, 'bots should not all start with the same SMG');
+  assert.ok(starters.size >= 3, 'bots should start with a mix of basic gear');
   for (const bot of state.bots) {
     assert.equal(bot.inventory[0], 0);
     assert.ok(bot.inventory.slice(2).every(slot => slot == null));
+    assert.ok(bot.inventory[1] == null || [1, 4, 5, 16].includes(bot.inventory[1]), 'bots should begin with only basic gear');
     if (bot.inventory[1] != null && WEAPONS[bot.inventory[1]].kind === 'gun') assert.equal(bot.ammo[bot.inventory[1]], WEAPONS[bot.inventory[1]].magazine);
     const zone = state.world.spawnZones[bot.team === 'blue' ? 0 : 1];
     assert.ok(Math.hypot(bot.x - zone.x, bot.y - zone.y) < 8 * 32);
@@ -197,7 +209,7 @@ test('deathmatch bots roll varied starter weapons on spawn and respawn', () => {
     assert.ok(bot.inventory[1] == null || WEAPONS[bot.inventory[1]]);
     respawnStarters.add(bot.inventory[1]);
   }
-  assert.ok(respawnStarters.size >= 5, 'bot respawns should also reroll their gear');
+  assert.ok(respawnStarters.size >= 3, 'bot respawns should also reroll their gear');
 });
 
 test('the player shares the arena starter roll and drops only found gear', () => {

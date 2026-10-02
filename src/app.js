@@ -1,4 +1,4 @@
-import { createFacility } from './facility.js?v=20261002-3';
+import { createFacility } from './facility.js?v=20261002-4';
 import { WEAPONS, LOOT_TABLE, SUPPLY_LOOT, createArenaStarterKit, createBotStarterKit, collectInventoryItem, consumeInventoryItem, healWithMedkit, isBlocked, hasLineOfSight, moveActor, changeDoorState, nearbyTerminal, operateTerminal, canSeeOpponent, canFireAt, scoreVisibleTarget, findPathStep, steerActor, updateArenaBot, revealTiles, createGunProjectiles, advanceProjectile, applyDamage, recordElimination, winningTeam, botWeaponScore as scoreBotWeapon, botWeaponPlan as planBotWeapon, botCanTakeLoot as botAcceptsLoot } from './arena-core.js?v=20261002-3';
 const $ = (selector) => document.querySelector(selector);
 const canvas = $('#world');

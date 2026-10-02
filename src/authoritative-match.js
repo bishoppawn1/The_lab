@@ -10,7 +10,7 @@ import {
 const TICK_SECONDS=1/30;
 const GRENADE_RANGE=210;
 const MAX_INPUT_AXIS=1;
-const BOT_SIGHT_RANGE=9*32;
+const BOT_SIGHT_RANGE=24*32;
 const EMPTY_INPUT=()=>({moveX:0,moveY:0,aim:0,fire:false,actions:[]});
 const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
 const clamp=(n,min,max)=>Math.max(min,Math.min(max,n));
@@ -75,7 +75,7 @@ export class AuthoritativeMatch {
   }
   makeFighter(team,ai,id){
     const kit=(ai?createBotStarterKit:createArenaStarterKit)(this.random),point=this.spawnPoint(team);
-    return{...point,id,team,ai,alive:true,r:ai?10:11,speed:ai?this.rand(85,115):176,
+    return{...point,id,team,ai,alive:true,r:ai?10:11,speed:ai?this.rand(150,170):176,
       hp:100,maxHp:100,armor:ai?25:35,invuln:0,hitFlash:0,respawn:0,
       ...kit,pickedSlots:[false,false,false,false],pickedArmor:false,
       angle:0,fireTime:0,reloadUntil:0,reloadingWeapon:null,think:0,target:null,

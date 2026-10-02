@@ -349,7 +349,7 @@ export function updateArenaBot(match,bot,dt,now,effects={}){
   const random=effects.random||Math.random;
   const rand=(low,high)=>low+random()*(high-low);
   const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
-  const visible=target=>canSeeOpponent(match.world,bot,target,match.botSightRange||448);
+  const visible=target=>canSeeOpponent(match.world,bot,target,match.botSightRange||24*32);
   const canTake=item=>effects.canTakeLoot?effects.canTakeLoot(bot,item):botCanTakeLoot(bot,item,random);
   const seek=(target,path,speed,requireLane=false)=>steerActor(match.world,bot,target,path,speed,dt,requireLane);
   if(bot.invuln>0)bot.invuln=Math.max(0,bot.invuln-dt);

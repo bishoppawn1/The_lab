@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import WebSocket from 'ws';
 import { createFacility } from '../src/facility.js';
 import { AuthoritativeMatch } from '../src/authoritative-match.js';
+import { updateArenaBot } from '../src/arena-core.js';
 import { startMatchServer } from '../scripts/match-server.js';
 
 function openArena(match){
@@ -29,6 +30,22 @@ test('the server owns a seeded map, team slots, and bounded movement',()=>{
   match.bots=bots;
   match.removePlayer(blue.id);
   assert.equal(match.bots.length,9,'a bot fills the released team slot');
+});
+
+test('server bots keep near-player movement speed and see a player 20 tiles down a clear lane',()=>{
+  const match=new AuthoritativeMatch({seed:20261002});
+  const player=match.addPlayer('blue'),bot=match.bots.find(fighter=>fighter.team==='red');
+  assert.ok(bot.speed>=150&&bot.speed<=170);
+  assert.ok(bot.speed<player.speed);
+  match.world={w:40,h:8,tile:32,map:Array.from({length:8},(_,y)=>Array.from({length:40},(_,x)=>x===0||y===0||x===39||y===7?1:0))};
+  Object.assign(player,{x:3.5*32,y:3.5*32});
+  Object.assign(bot,{x:23.5*32,y:3.5*32,speed:0,think:0,fireTime:Infinity});
+  const rules={world:match.world,bots:[bot],player,loot:[],elapsed:0,botSightRange:match.botSightRange};
+  updateArenaBot(rules,bot,.016,1000,{random:()=>.5});
+  assert.equal(bot.target,player);
+  bot.x=30.5*32;bot.think=0;
+  updateArenaBot(rules,bot,.016,1016,{random:()=>.5});
+  assert.equal(bot.target,null,'the range limit still stops distant tracking');
 });
 
 test('only simulated bullets, pickups, and damage change match state',()=>{

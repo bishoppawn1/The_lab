@@ -514,35 +514,35 @@ test('bots ignore hidden allies and switch to a visible attacker', () => {
   assert.equal(red.target, player, 'a visible attacker should replace an unreachable target');
 });
 
-test('players see distant clear lanes while bots still detect only nearby opponents', () => {
+test('bots detect opponents down a 20-tile clear lane but not beyond their range or through walls', () => {
   const { state, updateBot, updateVision, unitVisibleToTeam } = loadGameLogic();
-  const map = Array.from({ length: 15 }, (_, y) => Array.from({ length: 25 }, (_, x) => x === 0 || y === 0 || x === 24 || y === 14 ? 1 : 0));
-  state.world = { w: 25, h: 15, tile: 32, map, visible: new Set(), explored: new Set(), visionAt: 0 };
+  const map = Array.from({ length: 15 }, (_, y) => Array.from({ length: 40 }, (_, x) => x === 0 || y === 0 || x === 39 || y === 14 ? 1 : 0));
+  state.world = { w: 40, h: 15, tile: 32, map, visible: new Set(), explored: new Set(), visionAt: 0 };
   state.mode = 'pvp';
   state.loot = [];
   state.player = { x: 5.5 * 32, y: 5.5 * 32, r: 11, team: 'blue', alive: true };
-  const bot = { x: 12.5 * 32, y: 5.5 * 32, r: 10, speed: 0, team: 'red', alive: true, inventory: [0, null, null, null], active: 0, ammo: {}, think: 0, fireTime: Infinity };
+  const bot = { x: 25.5 * 32, y: 5.5 * 32, r: 10, speed: 0, team: 'red', alive: true, inventory: [0, null, null, null], active: 0, ammo: {}, think: 0, fireTime: Infinity };
   state.bots = [bot];
   updateVision(1000);
   assert.equal(unitVisibleToTeam(bot), true);
   updateBot(bot, .016, 1000);
   assert.equal(bot.target, state.player);
 
-  bot.x = 19.5 * 32;
+  bot.x = 32.5 * 32;
   bot.think = 0;
   updateVision(1200);
   assert.equal(unitVisibleToTeam(bot), true);
   updateBot(bot, .016, 1200);
-  assert.equal(bot.target, null);
+  assert.equal(bot.target, null, '27 tiles exceeds the sight range');
 
-  bot.x = 20.5 * 32;
+  bot.x = 29.5 * 32;
   bot.think = 0;
   updateVision(1400);
   assert.equal(unitVisibleToTeam(bot), true);
   updateBot(bot, .016, 1400);
-  assert.equal(bot.target, null);
+  assert.equal(bot.target, state.player, '24 tiles remains in range');
 
-  bot.x = 12.5 * 32;
+  bot.x = 25.5 * 32;
   map[5][10] = 1;
   bot.think = 0;
   updateVision(1600);
@@ -571,11 +571,11 @@ test('survival monsters only acquire a friendly guard through clear sight', () =
 
 test('hostile bots and monsters acquire the player only within sight range and without walls', () => {
   const { state, updateBot, updateEnemy } = loadGameLogic();
-  const map = Array.from({ length: 18 }, (_, y) => Array.from({ length: 25 }, (_, x) => x === 0 || y === 0 || x === 24 || y === 17 ? 1 : 0));
-  state.world = { w: 25, h: 18, tile: 32, map };
+  const map = Array.from({ length: 18 }, (_, y) => Array.from({ length: 36 }, (_, x) => x === 0 || y === 0 || x === 35 || y === 17 ? 1 : 0));
+  state.world = { w: 36, h: 18, tile: 32, map };
   state.mode = 'pvp';
   state.loot = [];
-  state.player = { x: 20.5 * 32, y: 5.5 * 32, r: 11, team: 'blue', alive: true };
+  state.player = { x: 31.5 * 32, y: 5.5 * 32, r: 11, team: 'blue', alive: true };
   const bot = { x: 5.5 * 32, y: 5.5 * 32, r: 10, speed: 0, team: 'red', alive: true, inventory: [0, null, null, null], active: 0, ammo: {}, think: 0, fireTime: Infinity, invuln: 0, hitFlash: 0 };
   state.bots = [bot];
   updateBot(bot, 0.016, 1000);
@@ -600,7 +600,7 @@ test('hostile bots and monsters acquire the player only within sight range and w
   monster.think = 0;
   updateEnemy(monster, 0.016, 1064);
   assert.equal(monster.target, state.player);
-  state.player.x = 19.5 * 32;
+  state.player.x = 31.5 * 32;
   monster.think = 0;
   updateEnemy(monster, 0.016, 1080);
   assert.equal(monster.target, null, 'monster should lose a distant player');

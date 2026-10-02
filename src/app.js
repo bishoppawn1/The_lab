@@ -1,5 +1,5 @@
 import { createFacility } from './facility.js?v=20261002-4';
-import { WEAPONS, LOOT_TABLE, SUPPLY_LOOT, createArenaStarterKit, createBotStarterKit, collectInventoryItem, consumeInventoryItem, healWithMedkit, isBlocked, hasLineOfSight, moveActor, changeDoorState, nearbyTerminal, operateTerminal, canSeeOpponent, canFireAt, scoreVisibleTarget, findPathStep, steerActor, updateArenaBot, revealTiles, createGunProjectiles, advanceProjectile, applyDamage, recordElimination, winningTeam, botWeaponScore as scoreBotWeapon, botWeaponPlan as planBotWeapon, botCanTakeLoot as botAcceptsLoot } from './arena-core.js?v=20261002-4';
+import { AI_SIGHT_RANGE, WEAPONS, LOOT_TABLE, SUPPLY_LOOT, createArenaStarterKit, createBotStarterKit, collectInventoryItem, consumeInventoryItem, healWithMedkit, isBlocked, hasLineOfSight, moveActor, changeDoorState, nearbyTerminal, operateTerminal, canSeeOpponent, canFireAt, scoreVisibleTarget, findPathStep, steerActor, updateArenaBot, revealTiles, createGunProjectiles, advanceProjectile, applyDamage, recordElimination, winningTeam, botWeaponScore as scoreBotWeapon, botWeaponPlan as planBotWeapon, botCanTakeLoot as botAcceptsLoot } from './arena-core.js?v=20261002-5';
 const $ = (selector) => document.querySelector(selector);
 const canvas = $('#world');
 const ctx = canvas.getContext('2d');
@@ -8,8 +8,8 @@ const mctx = minimap.getContext('2d');
 let minimapTerrain=null,terrainCtx=null;
 const menu = $('#menu'), setup = $('#setup'), game = $('#game');
 const COLORS = { floor:'#202a22', floor2:'#222d24', wall:'#414d42', wallEdge:'#60705e', grid:'#ffffff07', lime:'#c0ef75', red:'#f2745e', blue:'#72a9ed', pale:'#e8ede7' };
-const PLAYER_SIGHT_RANGE = 24 * 32;
-const BOT_SIGHT_RANGE = 24 * 32;
+const PLAYER_SIGHT_RANGE = AI_SIGHT_RANGE;
+const BOT_SIGHT_RANGE = AI_SIGHT_RANGE;
 const LOOT_RESPAWN_SECONDS = 6;
 const AMBIENT_LOOT_INTERVAL = 7;
 const AMBIENT_LOOT_LIMIT = 20;
@@ -557,7 +557,7 @@ function canSeePlayer(actor){return state.player?.alive&&dist(actor,state.player
 function firingLaneClear(actor,target){return canFireAt(state.world,actor,target);}
 function nextPathStep(actor,target){return findPathStep(state.world,actor,target);}
 function steerToward(actor,target,pathPoint,speed,dt,requireLane=false){steerActor(state.world,actor,target,pathPoint,speed,dt,requireLane);}
-function respawnBot(b){const zone=state.world.spawnZones[b.team==='blue'?0:1],p=findOpen(zone.x/32,zone.y/32,0,5),kit=createBotStarterKit(Math.random);b.x=p.x;b.y=p.y;b.hp=100;b.armor=25;b.alive=true;b.invuln=.55;b.respawn=0;b.inventory=kit.inventory;b.ammo=kit.ammo;b.pickedSlots=[false,false,false,false];b.pickedArmor=false;b.active=kit.active;b.target=null;b.recentAttacker=null;b.pathPoint=null;b.patrolTarget=null;b.patrolRoom=null;b.exploredRooms=new Set();b.lootJudgments=new WeakMap();b.think=0;b.fireTime=performance.now()+500;}
+function respawnBot(b){const zone=state.world.spawnZones[b.team==='blue'?0:1],p=findOpen(zone.x/32,zone.y/32,0,5),kit=createBotStarterKit(Math.random);b.x=p.x;b.y=p.y;b.hp=100;b.armor=25;b.alive=true;b.invuln=.55;b.respawn=0;b.inventory=kit.inventory;b.ammo=kit.ammo;b.pickedSlots=[false,false,false,false];b.pickedArmor=false;b.active=kit.active;b.target=null;b.recentAttacker=null;b.pathPoint=null;b.lastSeen=null;b.cover=null;b.coverPoint=null;b.coverPath=null;b.coverScanAt=0;b.searchPath=null;b.searchUntil=0;b.strafeUntil=0;b.patrolTarget=null;b.patrolRoom=null;b.exploredRooms=new Set();b.lootJudgments=new WeakMap();b.think=0;b.fireTime=performance.now()+500;}
 function respawnPlayer(){const p=state.player,zone=state.world.spawnZones[p.team==='blue'?0:1],pos=findOpen(zone.x/32,zone.y/32,0,5),kit=arenaStarterKit();p.x=pos.x;p.y=pos.y;p.hp=100;p.armor=25;p.alive=true;p.invuln=.65;p.respawn=0;p.inventory=kit.inventory;p.ammo=kit.ammo;p.active=kit.active;p.starterWeapon=kit.inventory[1];announce('OPERATOR BACK IN THE FIGHT');renderWeapons();}
 function burst(x,y,color,n){for(let i=0;i<n;i++)state.particles.push({x,y,vx:rand(-95,95),vy:rand(-95,95),life:rand(.12,.42),max:.42,color,r:rand(1,3)});}
 function muzzle(x,y,color){for(let i=0;i<3;i++)state.particles.push({x,y,vx:rand(-30,30),vy:rand(-30,30),life:.07,max:.07,color,r:rand(2,4)});}

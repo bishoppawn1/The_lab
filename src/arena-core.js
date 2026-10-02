@@ -29,6 +29,10 @@ export const LOOT_TABLE = [
 export const SUPPLY_LOOT = LOOT_TABLE.filter(item=>item.type!=='weapon');
 export const ARENA_STARTERS=[null,null,null,null,1,1,2,2,3,3,4,5,6,11,12,13,15,16,7,8,9,10,14];
 export const BOT_STARTERS=[null,null,null,null,4,4,5,16,1];
+// A little farther than the largest normal arena viewport diagonal, so a bot
+// reacts as soon as a player can see it along an unobstructed lane.
+export const AI_SIGHT_RANGE=24*32;
+const AI_MEMORY_SECONDS=6;
 
 function starterKit(random,pool){
   const second=pool[Math.floor(random()*pool.length)];
@@ -163,6 +167,29 @@ export function canFireAt(world,actor,target){
   return !isBlocked(world,muzzle.x,muzzle.y,2)&&hasLineOfSight(world,muzzle,target,2);
 }
 
+export function chooseCoverPosition(world,actor,target,random=Math.random){
+  if(!world.coverGrid?.size)return null;
+  let best=null;
+  for(const prop of world.coverGrid.values()){
+    const nearby=Math.hypot(prop.x-actor.x,prop.y-actor.y);
+    if(nearby>260)continue;
+    const threatDistance=Math.hypot(prop.x-target.x,prop.y-target.y);
+    if(threatDistance<100||threatDistance>620)continue;
+    const ax=(prop.x-target.x)/threatDistance,ay=(prop.y-target.y)/threatDistance;
+    const extent=Math.abs(ax)*(prop.halfW||14)+Math.abs(ay)*(prop.halfH||11);
+    const hide={x:prop.x+ax*(extent+(actor.r||10)+11),y:prop.y+ay*(extent+(actor.r||10)+11)};
+    if(isBlocked(world,hide.x,hide.y,actor.r||10)||hasLineOfSight(world,target,hide,2))continue;
+    const lateral=Math.max(prop.halfW||14,prop.halfH||11)+(actor.r||10)+15;
+    for(const side of [-1,1]){
+      const peek={x:hide.x-ay*lateral*side,y:hide.y+ax*lateral*side};
+      if(isBlocked(world,peek.x,peek.y,actor.r||10)||!canFireAt(world,peek,target))continue;
+      const score=nearby+Math.abs(threatDistance-260)*.14+random()*24;
+      if(!best||score<best.score)best={hide,peek,score};
+    }
+  }
+  return best&&{hide:best.hide,peek:best.peek};
+}
+
 export function scoreVisibleTarget(world,bot,target,range,elapsed){
   if(!canSeeOpponent(world,bot,target,range))return-Infinity;
   const attacker=target===bot.recentAttacker&&elapsed-(bot.attackedAt??-Infinity)<3;
@@ -204,6 +231,8 @@ export function steerActor(world,actor,target,pathPoint,speed,dt,requireLane=fal
     if(target===actor.target)actor.pathPoint=pathPoint;
     else if(target===actor.pickupTarget)actor.pickupPath=pathPoint;
     else if(target===actor.patrolTarget)actor.patrolPath=pathPoint;
+    else if(target===actor.coverPoint)actor.coverPath=pathPoint;
+    else if(target===actor.lastSeen)actor.searchPath=pathPoint;
   }
   const point=clear?target:pathPoint||target,dx=point.x-actor.x,dy=point.y-actor.y,d=Math.hypot(dx,dy),beforeX=actor.x,beforeY=actor.y;
   if(d>5)moveActor(world,actor,dx/d*speed*dt,dy/d*speed*dt);
@@ -344,14 +373,31 @@ export function botCanTakeLoot(bot,item,random=Math.random){
 }
 
 // The caller supplies effects such as shooting and pickup drops; targeting and
-// movement stay identical in the browser and a future match process.
+// movement stay identical in local matches and the authoritative room server.
 export function updateArenaBot(match,bot,dt,now,effects={}){
   const random=effects.random||Math.random;
   const rand=(low,high)=>low+random()*(high-low);
   const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
-  const visible=target=>canSeeOpponent(match.world,bot,target,match.botSightRange||24*32);
+  const sightRange=match.botSightRange??AI_SIGHT_RANGE;
+  const visible=target=>canSeeOpponent(match.world,bot,target,sightRange);
   const canTake=item=>effects.canTakeLoot?effects.canTakeLoot(bot,item):botCanTakeLoot(bot,item,random);
   const seek=(target,path,speed,requireLane=false)=>steerActor(match.world,bot,target,path,speed,dt,requireLane);
+  const alert=()=>bot.lastSeen&&match.elapsed-bot.lastSeen.seenAt<AI_MEMORY_SECONDS;
+  const useCover=()=>{
+    const cover=bot.cover;
+    if(!cover)return false;
+    let point=cover[cover.mode];
+    if(distance(bot,point)<18&&match.elapsed>=cover.switchAt){
+      cover.mode=cover.mode==='hide'?'peek':'hide';
+      cover.switchAt=match.elapsed+(cover.mode==='hide'?rand(.45,.9):rand(1.1,1.9));
+      point=cover[cover.mode];
+      bot.coverPath=null;
+    }
+    if(bot.coverPoint!==point){bot.coverPoint=point;bot.coverPath=null;}
+    if(!bot.coverPath)bot.coverPath=findPathStep(match.world,bot,point);
+    if(distance(bot,point)>8)seek(point,bot.coverPath,bot.speed*.78);
+    return cover.mode==='peek'&&distance(bot,point)<38;
+  };
   if(bot.invuln>0)bot.invuln=Math.max(0,bot.invuln-dt);
   if(bot.hitFlash>0)bot.hitFlash-=dt;
   effects.openNearbyDoor?.(bot);
@@ -363,16 +409,19 @@ export function updateArenaBot(match,bot,dt,now,effects={}){
   const currentRoom=rooms.find(room=>bot.x>(room.x+1)*32&&bot.x<(room.x+room.w-1)*32&&bot.y>(room.y+1)*32&&bot.y<(room.y+room.h-1)*32);
   if(currentRoom&&!bot.exploredRooms.has(currentRoom.name)){bot.exploredRooms.add(currentRoom.name);bot.think=0;}
   if(bot.think<=0){
-    bot.think=rand(.24,.4);
+    bot.think=rand(.12,.22);
     const enemies=[...match.bots,match.player].filter(visible);
-    bot.target=enemies.sort((a,b)=>scoreVisibleTarget(match.world,bot,b,match.botSightRange||448,match.elapsed)-scoreVisibleTarget(match.world,bot,a,match.botSightRange||448,match.elapsed))[0]||null;
+    bot.target=enemies.sort((a,b)=>scoreVisibleTarget(match.world,bot,b,sightRange,match.elapsed)-scoreVisibleTarget(match.world,bot,a,sightRange,match.elapsed))[0]||null;
+    if(bot.cover&&bot.target&&bot.cover.threat!==bot.target)bot.cover=null;
     bot.pathPoint=bot.target?findPathStep(match.world,bot,bot.target):null;
+    if(bot.target)bot.lastSeen={x:bot.target.x,y:bot.target.y,seenAt:match.elapsed};
+    else if(alert())bot.searchPath=findPathStep(match.world,bot,bot.lastSeen);
+    else{bot.lastSeen=null;bot.cover=null;bot.searchPath=null;}
     const nearest=match.loot.filter(item=>distance(bot,item)<145&&hasLineOfSight(match.world,bot,item)&&canTake(item)).sort((a,b)=>distance(bot,a)-distance(bot,b))[0];
-    const targetDistance=bot.target?distance(bot,bot.target):Infinity;
     const underFire=bot.recentAttacker?.alive&&match.elapsed-(bot.attackedAt??-Infinity)<3;
-    bot.pickupTarget=!underFire&&nearest&&targetDistance>185?nearest:null;
+    bot.pickupTarget=!alert()&&!underFire&&nearest?nearest:null;
     bot.pickupPath=bot.pickupTarget?findPathStep(match.world,bot,bot.pickupTarget):null;
-    if(!bot.target&&!bot.pickupTarget&&(!bot.patrolTarget||distance(bot,bot.patrolTarget)<28||now>=(bot.patrolUntil||0)||currentRoom?.name===bot.patrolRoom)){
+    if(!bot.target&&!alert()&&!bot.pickupTarget&&(!bot.patrolTarget||distance(bot,bot.patrolTarget)<28||now>=(bot.patrolUntil||0)||currentRoom?.name===bot.patrolRoom)){
       const candidates=rooms.filter(room=>room.name!=='ENTRY BAY'&&room.name!=='EXTRACTION BAY'&&!bot.exploredRooms.has(room.name));
       if(!candidates.length){bot.exploredRooms.clear();if(currentRoom)bot.exploredRooms.add(currentRoom.name);}
       const available=candidates.length?candidates:rooms.filter(room=>room.name!=='ENTRY BAY'&&room.name!=='EXTRACTION BAY'&&room.name!==currentRoom?.name);
@@ -383,22 +432,58 @@ export function updateArenaBot(match,bot,dt,now,effects={}){
       bot.patrolTarget=destination?{x:(destination.x+Math.floor(destination.w/2)+.5)*32,y:(destination.y+Math.floor(destination.h/2)+.5)*32}:effects.findPatrolPoint?.(bot)||null;
       bot.patrolUntil=now+rand(30000,45000);
     }
-    bot.patrolPath=bot.patrolTarget&&!bot.target&&!bot.pickupTarget?findPathStep(match.world,bot,bot.patrolTarget):null;
+    bot.patrolPath=bot.patrolTarget&&!bot.target&&!alert()&&!bot.pickupTarget?findPathStep(match.world,bot,bot.patrolTarget):null;
   }
   if(bot.target&&!visible(bot.target)){bot.target=null;bot.pathPoint=null;bot.think=0;}
   if(bot.target?.alive){
     const d=distance(bot,bot.target),angle=Math.atan2(bot.target.y-bot.y,bot.target.x-bot.x),clear=hasLineOfSight(match.world,bot,bot.target);
+    bot.lastSeen={x:bot.target.x,y:bot.target.y,seenAt:match.elapsed};
+    bot.searchUntil=0;
     bot.angle=angle;
     const available=bot.inventory.map((id,index)=>({id,index,score:typeof id==='number'?botWeaponScore(id,bot.target,d,clear):-100})).sort((a,b)=>b.score-a.score);
     if(available.length&&available[0].score>-20)bot.active=available[0].index;
-    const weapon=WEAPONS[bot.inventory[bot.active]],melee=weapon?.kind==='melee',reach=melee?weapon.range+bot.r:weapon?.maxRange||470;
-    if(bot.pickupTarget&&match.loot.includes(bot.pickupTarget))seek(bot.pickupTarget,bot.pickupPath,bot.speed);
-    else if(melee&&(d>reach-4||!clear))seek(bot.target,bot.pathPoint,bot.speed);
-    else if(!melee&&(d>145||!canFireAt(match.world,bot,bot.target)))seek(bot.target,bot.pathPoint,bot.speed,true);
-    else if(!melee&&d<95)moveActor(match.world,bot,-Math.cos(angle)*bot.speed*.4*dt,-Math.sin(angle)*bot.speed*.4*dt);
-    if(now>bot.fireTime&&d<reach&&(melee?clear:canFireAt(match.world,bot,bot.target))){
+    const weapon=WEAPONS[bot.inventory[bot.active]],melee=weapon?.kind==='melee',reach=melee?weapon.range+bot.r:weapon?.maxRange||(weapon?.family===3?620:470);
+    let readyToFire=melee?d<reach&&clear:false;
+    if(melee){
+      bot.cover=null;
+      if(d>reach-4||!clear)seek(bot.target,bot.pathPoint,bot.speed);
+    }else{
+      if(bot.cover&&distance(bot.cover.threatPoint,bot.target)>100)bot.cover=null;
+      if(!bot.cover&&d>130&&d<620&&match.elapsed>=(bot.coverScanAt||0)){
+        bot.coverScanAt=match.elapsed+1.4;
+        const position=chooseCoverPosition(match.world,bot,bot.target,random);
+        if(position)bot.cover={...position,mode:'hide',switchAt:match.elapsed+rand(.45,.9),threat:bot.target,threatPoint:{x:bot.target.x,y:bot.target.y}};
+      }
+      const lane=canFireAt(match.world,bot,bot.target);
+      if(bot.cover)readyToFire=useCover()&&lane&&d<reach;
+      else{
+        const preferred=weapon.family===2?170:weapon.family===1?300:reach-40;
+        const desired=Math.min(preferred,reach-35);
+        if(!lane||d>desired+35){
+          seek(bot.target,bot.pathPoint,bot.speed*.78,true);
+        }else if(d<desired*.6){
+          moveActor(match.world,bot,-Math.cos(angle)*bot.speed*.45*dt,-Math.sin(angle)*bot.speed*.45*dt);
+          readyToFire=d<reach;
+        }else{
+          if(now>=(bot.strafeUntil||0)){bot.strafeSide=random()<.5?-1:1;bot.strafeUntil=now+rand(900,1600);}
+          const before={x:bot.x,y:bot.y},side=bot.strafeSide||1;
+          moveActor(match.world,bot,-Math.sin(angle)*side*bot.speed*.38*dt,Math.cos(angle)*side*bot.speed*.38*dt);
+          if(distance(before,bot)<.1)bot.strafeSide=-side;
+          readyToFire=d<reach;
+        }
+      }
+    }
+    if(now>bot.fireTime&&readyToFire&&(melee?clear:canFireAt(match.world,bot,bot.target))){
       if(random()<.78)effects.shoot?.(bot,angle,now);
       else bot.fireTime=now+rand(200,450);
+    }
+  }else if(alert()){
+    bot.angle=Math.atan2(bot.lastSeen.y-bot.y,bot.lastSeen.x-bot.x);
+    if(bot.cover&&match.elapsed-bot.lastSeen.seenAt<3)useCover();
+    else if(distance(bot,bot.lastSeen)>34)seek(bot.lastSeen,bot.searchPath,bot.speed*.58);
+    else{
+      bot.searchUntil||=match.elapsed+1.15;
+      if(match.elapsed>=bot.searchUntil){bot.lastSeen=null;bot.cover=null;bot.searchPath=null;bot.think=0;}
     }
   }else if(bot.pickupTarget&&match.loot.includes(bot.pickupTarget))seek(bot.pickupTarget,bot.pickupPath,bot.speed);
   else if(bot.patrolTarget)seek(bot.patrolTarget,bot.patrolPath,bot.speed*.75);

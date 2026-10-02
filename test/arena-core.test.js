@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { createFacility, createSeededRandom } from '../src/facility.js';
 import {
   WEAPONS, createArenaStarterKit, createBotStarterKit, collectInventoryItem, consumeInventoryItem, healWithMedkit,
-  botWeaponPlan, updateArenaBot, isBlocked, hasLineOfSight, moveActor, findPathStep,
+  botWeaponPlan, updateArenaBot, chooseCoverPosition, isBlocked, hasLineOfSight, canFireAt, moveActor, findPathStep,
   changeDoorState, nearbyTerminal, operateTerminal, canSeeOpponent, revealTiles, createGunProjectiles,
   advanceProjectile, applyDamage, recordElimination, winningTeam,
 } from '../src/arena-core.js';
@@ -104,7 +104,7 @@ test('shared inventory rules keep supplies in four slots and preserve stronger g
   assert.equal(fighter.armor,50);
 });
 
-test('a bot can acquire and lose a target in the headless arena rules', () => {
+test('a bot reacts to a clear target, then searches its last seen position without tracking through a wall', () => {
   const map=Array.from({length:9},(_,y)=>Array.from({length:12},(_,x)=>x===0||y===0||x===11||y===8?1:0));
   const world={w:12,h:9,tile:32,map};
   const bot={x:2.5*32,y:4.5*32,r:10,speed:100,team:'blue',alive:true,inventory:[0,null,null,null],active:0,think:0,fireTime:Infinity};
@@ -112,11 +112,48 @@ test('a bot can acquire and lose a target in the headless arena rules', () => {
   const match={world,bots:[bot],player,loot:[],elapsed:0,botSightRange:448};
   updateArenaBot(match,bot,.1,1000,{random:()=>.5});
   assert.equal(bot.target,player);
-  assert.ok(bot.x>2.5*32);
+  assert.ok(bot.x<2.5*32,'a gun bot should back away rather than charge directly into a close firing lane');
+  const lastSeenX=bot.lastSeen.x;
   map[4][5]=1;
+  player.x=9.5*32;
+  match.elapsed=1;
   bot.think=0;
   updateArenaBot(match,bot,.1,1100,{random:()=>.5});
   assert.equal(bot.target,null);
+  assert.equal(bot.lastSeen.x,lastSeenX,'the bot must remember the old location, not follow hidden movement');
+  match.elapsed=7;
+  bot.think=0;
+  updateArenaBot(match,bot,.1,1200,{random:()=>.5});
+  assert.equal(bot.lastSeen,null,'a stale contact should be forgotten');
+});
+
+test('a gun bot takes solid cover, waits behind it, then peeks and fires only with a lane',()=>{
+  const map=Array.from({length:12},(_,y)=>Array.from({length:16},(_,x)=>x===0||y===0||x===15||y===11?1:0));
+  const prop={x:7.5*32,y:5.5*32,halfW:14,halfH:11};
+  const world={w:16,h:12,tile:32,map,coverGrid:new Map([['7,5',prop]])};
+  const bot={x:6.5*32,y:7.5*32,r:10,speed:100,team:'blue',alive:true,inventory:[0,null,null,null],active:0,think:0,fireTime:0};
+  const player={x:11.5*32,y:5.5*32,r:11,team:'red',alive:true};
+  const match={world,bots:[bot],player,loot:[],elapsed:0,botSightRange:24*32};
+  const cover=chooseCoverPosition(world,bot,player,()=>.5);
+  assert.ok(cover);
+  assert.equal(hasLineOfSight(world,player,cover.hide,2),false);
+  assert.equal(canFireAt(world,cover.peek,player),true);
+  let shots=0;
+  const effects={random:()=>.5,shoot:()=>shots++};
+  updateArenaBot(match,bot,.1,1000,effects);
+  assert.equal(bot.cover.mode,'hide');
+  assert.equal(shots,0,'the bot should not fire while moving into cover');
+  Object.assign(bot,bot.cover.hide,{think:0});
+  match.elapsed=1;
+  updateArenaBot(match,bot,.1,2000,effects);
+  assert.equal(bot.target,null,'cover breaks sight without granting hidden tracking');
+  assert.equal(bot.cover.mode,'peek');
+  assert.equal(shots,0);
+  Object.assign(bot,bot.cover.peek,{think:0});
+  match.elapsed=1.1;
+  updateArenaBot(match,bot,.1,2100,effects);
+  assert.equal(bot.target,player);
+  assert.equal(shots,1,'the bot fires after peeking into a clear lane');
 });
 
 test('solid room furniture blocks movement, sight, and gunfire while its front stays visible', () => {

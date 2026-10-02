@@ -1,6 +1,6 @@
 import { createFacility, createSeededRandom } from './facility.js';
 import {
-  WEAPONS, LOOT_TABLE, SUPPLY_LOOT, createArenaStarterKit, createBotStarterKit, collectInventoryItem,
+  AI_SIGHT_RANGE, WEAPONS, LOOT_TABLE, SUPPLY_LOOT, createArenaStarterKit, createBotStarterKit, collectInventoryItem,
   consumeInventoryItem, healWithMedkit, isBlocked, hasLineOfSight, moveActor,
   changeDoorState, nearbyTerminal, operateTerminal, updateArenaBot, revealTiles, createGunProjectiles,
   advanceProjectile, applyDamage, recordElimination, winningTeam, botCanTakeLoot,
@@ -10,7 +10,7 @@ import {
 const TICK_SECONDS=1/30;
 const GRENADE_RANGE=210;
 const MAX_INPUT_AXIS=1;
-const BOT_SIGHT_RANGE=24*32;
+const BOT_SIGHT_RANGE=AI_SIGHT_RANGE;
 const EMPTY_INPUT=()=>({moveX:0,moveY:0,aim:0,fire:false,actions:[]});
 const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
 const clamp=(n,min,max)=>Math.max(min,Math.min(max,n));
@@ -254,7 +254,7 @@ export class AuthoritativeMatch {
     const point=this.spawnPoint(actor.team),kit=(actor.ai?createBotStarterKit:createArenaStarterKit)(this.random);
     Object.assign(actor,point,kit,{alive:true,hp:100,armor:actor.ai?25:35,invuln:actor.ai?.55:.65,
       respawn:0,reloadUntil:0,reloadingWeapon:null,pickedSlots:[false,false,false,false],pickedArmor:false,
-      target:null,recentAttacker:null,pathPoint:null,pickupTarget:null,patrolTarget:null,patrolRoom:null,exploredRooms:new Set(),think:0,fireTime:this.elapsed*1000+500});
+      target:null,recentAttacker:null,pathPoint:null,lastSeen:null,cover:null,coverPoint:null,coverPath:null,coverScanAt:0,searchPath:null,searchUntil:0,strafeUntil:0,pickupTarget:null,patrolTarget:null,patrolRoom:null,exploredRooms:new Set(),think:0,fireTime:this.elapsed*1000+500});
     actor.input=EMPTY_INPUT();
   }
   step(dt=TICK_SECONDS){

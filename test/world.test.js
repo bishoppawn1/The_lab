@@ -73,6 +73,10 @@ test('generated rooms remain connected across different layouts', () => {
     assert.equal(world.rooms[0].name, 'ENTRY BAY');
     assert.equal(world.rooms.at(-1).name, 'EXTRACTION BAY');
     assert.equal(new Set(world.rooms.map(room => room.name)).size, 18, 'every room theme should appear once');
+    const hub = world.rooms.find(room => room.name === 'SUPPLY HUB');
+    assert.ok(hub.w * hub.h >= 400, 'the central cache should be larger than a standard room');
+    assert.ok(Math.hypot(hub.x + hub.w / 2 - world.w / 2, hub.y + hub.h / 2 - world.h / 2) < 30);
+    assert.ok(state.roomProps.every(prop => !(prop.x / 32 > hub.x && prop.x / 32 < hub.x + hub.w && prop.y / 32 > hub.y && prop.y / 32 < hub.y + hub.h)), 'the cache should remain open');
     layouts.add(world.rooms.map(room => `${room.x},${room.y},${room.w},${room.h}`).join('|'));
     const reachable = reachableTiles(world, world.spawnZones[0]);
     for (const room of world.rooms) {
@@ -259,9 +263,9 @@ test('larger maps receive more supplies without flooding them with weapons', () 
     state.mode = mode;
     generateWorld(mode);
     spawnLoot(count);
-    assert.equal(state.loot.length, count + 13);
+    assert.equal(state.loot.length, count + 22);
     assert.ok(state.loot.slice(weaponLimit, count).every(item => item.type !== 'weapon'), `${mode} extra random pickup sites should contain supplies`);
-    assert.equal(new Set(state.loot.map(item => item.spawnId)).size, count + 13);
+    assert.equal(new Set(state.loot.map(item => item.spawnId)).size, count + 22);
     const armory = state.world.rooms.find(room => room.name === 'ARMORY');
     assert.equal(state.loot.filter(item => item.room === armory.name && item.type === 'weapon').length, 4, 'armory should hold a reliable weapon cache');
     const medical = state.world.rooms.find(room => room.name === 'MEDICAL');
@@ -498,14 +502,14 @@ test('bots ignore hidden allies and switch to a visible attacker', () => {
   assert.equal(red.target, player, 'a visible attacker should replace an unreachable target');
 });
 
-test('player and bot sight ranges agree, and unseen units stay hidden', () => {
+test('players see distant clear lanes while bots still detect only nearby opponents', () => {
   const { state, updateBot, updateVision, unitVisibleToTeam } = loadGameLogic();
   const map = Array.from({ length: 15 }, (_, y) => Array.from({ length: 25 }, (_, x) => x === 0 || y === 0 || x === 24 || y === 14 ? 1 : 0));
   state.world = { w: 25, h: 15, tile: 32, map, visible: new Set(), explored: new Set(), visionAt: 0 };
   state.mode = 'pvp';
   state.loot = [];
   state.player = { x: 5.5 * 32, y: 5.5 * 32, r: 11, team: 'blue', alive: true };
-  const bot = { x: 16.5 * 32, y: 5.5 * 32, r: 10, speed: 0, team: 'red', alive: true, inventory: [0, null, null, null], active: 0, ammo: {}, think: 0, fireTime: Infinity };
+  const bot = { x: 12.5 * 32, y: 5.5 * 32, r: 10, speed: 0, team: 'red', alive: true, inventory: [0, null, null, null], active: 0, ammo: {}, think: 0, fireTime: Infinity };
   state.bots = [bot];
   updateVision(1000);
   assert.equal(unitVisibleToTeam(bot), true);
@@ -517,16 +521,16 @@ test('player and bot sight ranges agree, and unseen units stay hidden', () => {
   updateVision(1200);
   assert.equal(unitVisibleToTeam(bot), true);
   updateBot(bot, .016, 1200);
-  assert.equal(bot.target, state.player);
+  assert.equal(bot.target, null);
 
   bot.x = 20.5 * 32;
   bot.think = 0;
   updateVision(1400);
-  assert.equal(unitVisibleToTeam(bot), false);
+  assert.equal(unitVisibleToTeam(bot), true);
   updateBot(bot, .016, 1400);
   assert.equal(bot.target, null);
 
-  bot.x = 16.5 * 32;
+  bot.x = 12.5 * 32;
   map[5][10] = 1;
   bot.think = 0;
   updateVision(1600);

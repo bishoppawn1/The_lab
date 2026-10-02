@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createFacility, createSeededRandom } from '../src/facility.js';
 import {
-  WEAPONS, createArenaStarterKit, collectInventoryItem, consumeInventoryItem, healWithMedkit,
-  botWeaponPlan, updateArenaBot, isBlocked, hasLineOfSight, moveActor,
+  WEAPONS, createArenaStarterKit, createBotStarterKit, collectInventoryItem, consumeInventoryItem, healWithMedkit,
+  botWeaponPlan, updateArenaBot, isBlocked, hasLineOfSight, moveActor, findPathStep,
   changeDoorState, canSeeOpponent, revealTiles, createGunProjectiles,
   advanceProjectile, applyDamage, recordElimination, winningTeam,
 } from '../src/arena-core.js';
@@ -89,4 +89,39 @@ test('a bot can acquire and lose a target in the headless arena rules', () => {
   bot.think=0;
   updateArenaBot(match,bot,.1,1100,{random:()=>.5});
   assert.equal(bot.target,null);
+});
+
+test('solid room furniture blocks movement, sight, and gunfire while its front stays visible', () => {
+  const map=Array.from({length:9},(_,y)=>Array.from({length:12},(_,x)=>x===0||y===0||x===11||y===8?1:0));
+  const prop={x:5.5*32,y:4.5*32,halfW:14,halfH:11};
+  const world={w:12,h:9,tile:32,map,coverGrid:new Map([['5,4',prop]])};
+  const actor={x:3.5*32,y:4.5*32,r:10},target={x:8.5*32,y:4.5*32};
+  assert.equal(isBlocked(world,prop.x,prop.y,10),true);
+  assert.equal(hasLineOfSight(world,actor,target),false);
+  const visible=revealTiles(world,[{actor,radius:Infinity}]);
+  assert.equal(visible.has('5,4'),true,'the cover itself should be visible');
+  assert.equal(visible.has('8,4'),false,'terrain behind cover stays hidden');
+  const [shot]=createGunProjectiles(actor,WEAPONS[0],0);
+  advanceProjectile(world,shot,.4,[]);
+  assert.equal(shot.dead,true);
+  assert.ok(shot.x<target.x);
+  const next=findPathStep(world,actor,target);
+  assert.notDeepEqual(next,{x:prop.x,y:prop.y},'bots must route around solid props');
+});
+
+test('under-equipped bots search new rooms and prioritize the central cache', () => {
+  const map=Array.from({length:20},(_,y)=>Array.from({length:30},(_,x)=>x===0||y===0||x===29||y===19?1:0));
+  const rooms=[{name:'ENTRY BAY',x:2,y:7,w:5,h:5},{name:'SUPPLY HUB',x:11,y:6,w:7,h:7},{name:'ARMORY',x:23,y:7,w:5,h:5}];
+  const world={w:30,h:20,tile:32,map,rooms};
+  const bot={x:4.5*32,y:9.5*32,r:10,speed:100,team:'blue',alive:true,inventory:[0,null,null,null],active:0,think:0,fireTime:Infinity};
+  const match={world,bots:[bot],player:null,loot:[],elapsed:0,botSightRange:288};
+  updateArenaBot(match,bot,.016,1000,{random:()=>0});
+  assert.equal(bot.patrolRoom,'SUPPLY HUB');
+  assert.ok(bot.exploredRooms.has('ENTRY BAY'));
+  Object.assign(bot,{x:14.5*32,y:9.5*32,think:0});
+  updateArenaBot(match,bot,.016,1100,{random:()=>0});
+  assert.ok(bot.exploredRooms.has('SUPPLY HUB'));
+  assert.equal(bot.patrolRoom,'ARMORY');
+  const kit=createBotStarterKit(()=>0);
+  assert.deepEqual(kit.inventory,[0,null,null,null]);
 });

@@ -1,6 +1,6 @@
 import { createFacility, createSeededRandom } from './facility.js';
 import {
-  WEAPONS, LOOT_TABLE, SUPPLY_LOOT, createArenaStarterKit, collectInventoryItem,
+  WEAPONS, LOOT_TABLE, SUPPLY_LOOT, createArenaStarterKit, createBotStarterKit, collectInventoryItem,
   consumeInventoryItem, healWithMedkit, isBlocked, hasLineOfSight, moveActor,
   changeDoorState, updateArenaBot, revealTiles, createGunProjectiles,
   advanceProjectile, applyDamage, recordElimination, winningTeam, botCanTakeLoot,
@@ -10,8 +10,7 @@ import {
 const TICK_SECONDS=1/30;
 const GRENADE_RANGE=210;
 const MAX_INPUT_AXIS=1;
-const SIGHT_TILES=14;
-const BOT_SIGHT_RANGE=SIGHT_TILES*32;
+const BOT_SIGHT_RANGE=9*32;
 const EMPTY_INPUT=()=>({moveX:0,moveY:0,aim:0,fire:false,actions:[]});
 const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
 const clamp=(n,min,max)=>Math.max(min,Math.min(max,n));
@@ -75,7 +74,7 @@ export class AuthoritativeMatch {
     return this.openSpot(zone,0,7)||{...zone};
   }
   makeFighter(team,ai,id){
-    const kit=createArenaStarterKit(this.random),point=this.spawnPoint(team);
+    const kit=(ai?createBotStarterKit:createArenaStarterKit)(this.random),point=this.spawnPoint(team);
     return{...point,id,team,ai,alive:true,r:ai?10:11,speed:ai?this.rand(85,115):176,
       hp:100,maxHp:100,armor:ai?25:35,invuln:0,hitFlash:0,respawn:0,
       ...kit,pickedSlots:[false,false,false,false],pickedArmor:false,
@@ -142,7 +141,12 @@ export class AuthoritativeMatch {
       const type=kind=>LOOT_TABLE.find(item=>item.type===kind);
       if(room.name==='ARMORY')for(const family of [0,1,2,3])add(this.weightedLoot(LOOT_TABLE.filter(item=>item.type==='weapon'&&WEAPONS[item.weapon].family===family)),family);
       else if(room.name==='MEDICAL'){for(let i=0;i<3;i++)add(type('health'),i);add(type('armor'),3);}
-      else if(room.name==='STORAGE'){add(type('grenade'),0);add(type('armor'),1);}
+      else if(room.name==='SUPPLY HUB'){
+        let index=0;
+        for(const weapon of [1,2,3,7,8,9])add(LOOT_TABLE.find(item=>item.weapon===weapon),index++);
+        for(let i=0;i<2;i++){add(type('health'),index++);add(type('armor'),index++);}
+        add(type('grenade'),index);
+      }
       else if(room.name==='WORKSHOP')add(LOOT_TABLE.find(item=>item.weapon===16),0);
       else if(room.name==='POWER STATION')add(type('armor'),0);
       else if(room.name==='RESEARCH LAB')add(type('health'),0);
@@ -245,10 +249,10 @@ export class AuthoritativeMatch {
     return true;
   }
   respawn(actor){
-    const point=this.spawnPoint(actor.team),kit=createArenaStarterKit(this.random);
+    const point=this.spawnPoint(actor.team),kit=(actor.ai?createBotStarterKit:createArenaStarterKit)(this.random);
     Object.assign(actor,point,kit,{alive:true,hp:100,armor:actor.ai?25:35,invuln:actor.ai?.55:.65,
       respawn:0,reloadUntil:0,reloadingWeapon:null,pickedSlots:[false,false,false,false],pickedArmor:false,
-      target:null,recentAttacker:null,pathPoint:null,pickupTarget:null,patrolTarget:null,think:0,fireTime:this.elapsed*1000+500});
+      target:null,recentAttacker:null,pathPoint:null,pickupTarget:null,patrolTarget:null,patrolRoom:null,exploredRooms:new Set(),think:0,fireTime:this.elapsed*1000+500});
     actor.input=EMPTY_INPUT();
   }
   step(dt=TICK_SECONDS){
@@ -300,7 +304,7 @@ export class AuthoritativeMatch {
       const pool=(previous.room==='ARMORY'?LOOT_TABLE.filter(item=>item.type==='weapon'&&WEAPONS[item.weapon].kind==='gun'):
         previous.room==='WORKSHOP'?LOOT_TABLE.filter(item=>item.type==='weapon'&&WEAPONS[item.weapon].kind==='melee'):
         previous.room==='MEDICAL'?LOOT_TABLE.filter(item=>item.type==='health'||item.type==='armor'):
-        ['STORAGE','POWER STATION','RESEARCH LAB'].includes(previous.room)?SUPPLY_LOOT:LOOT_TABLE)
+        ['POWER STATION','RESEARCH LAB'].includes(previous.room)?SUPPLY_LOOT:LOOT_TABLE)
         .filter(item=>item.type!==previous.type||item.weapon!==previous.weapon);
       const room=previous.room&&this.world.rooms.find(candidate=>candidate.name===previous.room);
       this.addLoot(this.weightedLoot(pool),this.openSpot(previous,5,Infinity,room)||this.openSpot(null,0,Infinity,room),previous.room,previous.spawnId);
@@ -320,7 +324,7 @@ export class AuthoritativeMatch {
     let visible=this.visionCache.get(viewer.team);
     if(!visible){
       const allies=this.fighters.filter(f=>f.alive&&f.team===viewer.team);
-      visible=revealTiles(this.world,allies.map(actor=>({actor,radius:actor.ai?9:SIGHT_TILES})));
+      visible=revealTiles(this.world,allies.map(actor=>({actor,radius:actor.ai?9:Infinity})));
       this.visionCache.set(viewer.team,visible);
     }
     const seen=actor=>visible.has(`${Math.floor(actor.x/32)},${Math.floor(actor.y/32)}`);

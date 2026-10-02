@@ -41,16 +41,16 @@ function addDoor(state) {
   return door;
 }
 
-test('player visibility reaches 14 tiles in both modes and still stops at walls', () => {
+test('player visibility reaches the end of an open hall in both modes and still stops at walls', () => {
   for (const mode of ['survival', 'pvp']) {
     const { state, updateVision } = fixture(mode);
     updateVision(1000);
-    assert.equal(state.world.visible.has('34,20'), true, '14 tiles away is visible');
-    assert.equal(state.world.visible.has('35,20'), false, '15 tiles away remains hidden');
-    assert.equal(state.world.visible.has('30,30'), false, 'range is circular');
+    assert.equal(state.world.visible.has('45,20'), true, '25 tiles down a clear hall is visible');
+    assert.equal(state.world.visible.has('35,20'), true, 'there is no fixed 14-tile limit');
+    assert.equal(state.world.visible.has('30,30'), true, 'clear diagonal tiles are visible');
     state.world.map[20][25] = 1;
     updateVision(1200);
-    assert.equal(state.world.visible.has('34,20'), false, 'walls still occlude distant terrain');
+    assert.equal(state.world.visible.has('45,20'), false, 'walls still occlude distant terrain');
   }
 });
 

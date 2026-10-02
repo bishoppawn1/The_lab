@@ -28,13 +28,16 @@ export const LOOT_TABLE = [
 ];
 export const SUPPLY_LOOT = LOOT_TABLE.filter(item=>item.type!=='weapon');
 export const ARENA_STARTERS=[null,null,null,null,1,1,2,2,3,3,4,5,6,11,12,13,15,16,7,8,9,10,14];
+export const BOT_STARTERS=[null,null,null,null,4,4,5,16,1];
 
-export function createArenaStarterKit(random=Math.random){
-  const second=ARENA_STARTERS[Math.floor(random()*ARENA_STARTERS.length)];
+function starterKit(random,pool){
+  const second=pool[Math.floor(random()*pool.length)];
   const inventory=[0,second,null,null],ammo={0:WEAPONS[0].magazine};
   if(second!=null&&WEAPONS[second].kind==='gun')ammo[second]=WEAPONS[second].magazine;
   return{inventory,ammo,active:second==null?0:Math.floor(random()*2)};
 }
+export function createArenaStarterKit(random=Math.random){return starterKit(random,ARENA_STARTERS);}
+export function createBotStarterKit(random=Math.random){return starterKit(random,BOT_STARTERS);}
 
 export function collectInventoryItem(actor,item,slot=null){
   if(item.type==='armor'){
@@ -78,10 +81,20 @@ export function healWithMedkit(actor,slot=null){
 
 export function isBlocked(world,x,y,radius=7){
   const tile=world.tile||32;
-  return [[x-radius,y-radius],[x+radius,y-radius],[x-radius,y+radius],[x+radius,y+radius]].some(([cx,cy])=>{
+  for(const cy of [y-radius,y+radius])for(const cx of [x-radius,x+radius]){
     const tx=Math.floor(cx/tile),ty=Math.floor(cy/tile);
-    return world.map[ty]?.[tx]!==0||world.doorTiles?.get(`${tx},${ty}`)?.open===false;
-  });
+    if(world.map[ty]?.[tx]!==0||world.doorTiles?.get(`${tx},${ty}`)?.open===false)return true;
+  }
+  if(!world.coverGrid?.size)return false;
+  const minX=Math.floor((x-radius)/tile),maxX=Math.floor((x+radius)/tile),minY=Math.floor((y-radius)/tile),maxY=Math.floor((y+radius)/tile);
+  for(let ty=minY-1;ty<=maxY+1;ty++)for(let tx=minX-1;tx<=maxX+1;tx++){
+    const prop=world.coverGrid.get(`${tx},${ty}`);
+    if(!prop)continue;
+    const nearestX=Math.max(prop.x-prop.halfW,Math.min(x,prop.x+prop.halfW));
+    const nearestY=Math.max(prop.y-prop.halfH,Math.min(y,prop.y+prop.halfH));
+    if((x-nearestX)**2+(y-nearestY)**2<radius**2)return true;
+  }
+  return false;
 }
 
 export function hasLineOfSight(world,a,b,radius=7){
@@ -129,7 +142,7 @@ export function scoreVisibleTarget(world,bot,target,range,elapsed){
 export function findPathStep(world,actor,target){
   const w=world.w,h=world.h,tile=world.tile||32,toIndex=(x,y)=>y*w+x;
   const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
-  const floorTile=(x,y)=>world.map[y]?.[x]===0;
+  const floorTile=(x,y)=>world.map[y]?.[x]===0&&!world.coverGrid?.has(`${x},${y}`);
   const sx=clamp(Math.floor(actor.x/tile),1,w-2),sy=clamp(Math.floor(actor.y/tile),1,h-2);
   let gx=clamp(Math.floor(target.x/tile),1,w-2),gy=clamp(Math.floor(target.y/tile),1,h-2);
   if(!floorTile(gx,gy)){
@@ -159,6 +172,7 @@ export function steerActor(world,actor,target,pathPoint,speed,dt,requireLane=fal
     actor.think=0;pathPoint=findPathStep(world,actor,target);
     if(target===actor.target)actor.pathPoint=pathPoint;
     else if(target===actor.pickupTarget)actor.pickupPath=pathPoint;
+    else if(target===actor.patrolTarget)actor.patrolPath=pathPoint;
   }
   const point=clear?target:pathPoint||target,dx=point.x-actor.x,dy=point.y-actor.y,d=Math.hypot(dx,dy),beforeX=actor.x,beforeY=actor.y;
   if(d>5)moveActor(world,actor,dx/d*speed*dt,dy/d*speed*dt);
@@ -173,13 +187,38 @@ export function steerActor(world,actor,target,pathPoint,speed,dt,requireLane=fal
   }else actor.stuckTime=0;
 }
 
+function visionRayClear(world,actor,x,y){
+  const tile=world.tile||32,targetX=(x+.5)*tile,targetY=(y+.5)*tile;
+  let cx=Math.floor(actor.x/tile),cy=Math.floor(actor.y/tile);
+  const dx=targetX-actor.x,dy=targetY-actor.y,sx=Math.sign(dx),sy=Math.sign(dy);
+  let nextX=sx?((cx+(sx>0?1:0))*tile-actor.x)/dx:Infinity;
+  let nextY=sy?((cy+(sy>0?1:0))*tile-actor.y)/dy:Infinity;
+  const deltaX=sx?tile/Math.abs(dx):Infinity,deltaY=sy?tile/Math.abs(dy):Infinity;
+  const blocked=(tx,ty)=>{
+    const key=`${tx},${ty}`;
+    return world.map[ty]?.[tx]!==0||world.doorTiles?.get(key)?.open===false||world.coverGrid?.has(key);
+  };
+  while(cx!==x||cy!==y){
+    if(nextX<nextY){cx+=sx;nextX+=deltaX;}
+    else if(nextY<nextX){cy+=sy;nextY+=deltaY;}
+    else{
+      if(blocked(cx+sx,cy)||blocked(cx,cy+sy))return false;
+      cx+=sx;cy+=sy;nextX+=deltaX;nextY+=deltaY;
+    }
+    if(cx===x&&cy===y)return true;
+    if(blocked(cx,cy))return false;
+  }
+  return true;
+}
+
 export function revealTiles(world,observers){
   const visible=new Set(),tile=world.tile||32;
   for(const {actor,radius} of observers){
     const tx=Math.floor(actor.x/tile),ty=Math.floor(actor.y/tile);
-    for(let y=Math.max(1,ty-radius);y<=Math.min(world.h-2,ty+radius);y++)for(let x=Math.max(1,tx-radius);x<=Math.min(world.w-2,tx+radius);x++){
-      if(Math.hypot(x-tx,y-ty)>radius||world.map[y]?.[x]!==0)continue;
-      if(hasLineOfSight(world,actor,{x:(x+.5)*tile,y:(y+.5)*tile}))visible.add(`${x},${y}`);
+    const limit=Number.isFinite(radius)?radius:Infinity;
+    for(let y=Math.max(1,ty-limit);y<=Math.min(world.h-2,ty+limit);y++)for(let x=Math.max(1,tx-limit);x<=Math.min(world.w-2,tx+limit);x++){
+      if(limit!==Infinity&&Math.hypot(x-tx,y-ty)>limit||world.map[y]?.[x]!==0)continue;
+      if(visionRayClear(world,actor,x,y))visible.add(`${x},${y}`);
     }
   }
   return visible;
@@ -288,6 +327,10 @@ export function updateArenaBot(match,bot,dt,now,effects={}){
   bot.think-=dt;
   effects.pickupLoot?.(bot);
   effects.useMedkit?.(bot);
+  const rooms=match.world.rooms||[];
+  bot.exploredRooms??=new Set();
+  const currentRoom=rooms.find(room=>bot.x>(room.x+1)*32&&bot.x<(room.x+room.w-1)*32&&bot.y>(room.y+1)*32&&bot.y<(room.y+room.h-1)*32);
+  if(currentRoom&&!bot.exploredRooms.has(currentRoom.name)){bot.exploredRooms.add(currentRoom.name);bot.think=0;}
   if(bot.think<=0){
     bot.think=rand(.24,.4);
     const enemies=[...match.bots,match.player].filter(visible);
@@ -298,9 +341,16 @@ export function updateArenaBot(match,bot,dt,now,effects={}){
     const underFire=bot.recentAttacker?.alive&&match.elapsed-(bot.attackedAt??-Infinity)<3;
     bot.pickupTarget=!underFire&&nearest&&targetDistance>185?nearest:null;
     bot.pickupPath=bot.pickupTarget?findPathStep(match.world,bot,bot.pickupTarget):null;
-    if(!bot.target&&!bot.pickupTarget&&(!bot.patrolTarget||distance(bot,bot.patrolTarget)<28||now>=(bot.patrolUntil||0))){
-      bot.patrolTarget=effects.findPatrolPoint?.(bot)||null;
-      bot.patrolUntil=now+rand(20000,32000);
+    if(!bot.target&&!bot.pickupTarget&&(!bot.patrolTarget||distance(bot,bot.patrolTarget)<28||now>=(bot.patrolUntil||0)||currentRoom?.name===bot.patrolRoom)){
+      const candidates=rooms.filter(room=>room.name!=='ENTRY BAY'&&room.name!=='EXTRACTION BAY'&&!bot.exploredRooms.has(room.name));
+      if(!candidates.length){bot.exploredRooms.clear();if(currentRoom)bot.exploredRooms.add(currentRoom.name);}
+      const available=candidates.length?candidates:rooms.filter(room=>room.name!=='ENTRY BAY'&&room.name!=='EXTRACTION BAY'&&room.name!==currentRoom?.name);
+      const choices=available.map(room=>({room,
+        score:distance(bot,{x:(room.x+room.w/2)*32,y:(room.y+room.h/2)*32})/32-(room.name==='SUPPLY HUB'?15:room.name==='ARMORY'?11:room.name==='MEDICAL'?5:0)+rand(0,12)})).sort((a,b)=>a.score-b.score);
+      const destination=choices[Math.floor(random()*Math.min(3,choices.length))]?.room;
+      bot.patrolRoom=destination?.name||null;
+      bot.patrolTarget=destination?{x:(destination.x+Math.floor(destination.w/2)+.5)*32,y:(destination.y+Math.floor(destination.h/2)+.5)*32}:effects.findPatrolPoint?.(bot)||null;
+      bot.patrolUntil=now+rand(30000,45000);
     }
     bot.patrolPath=bot.patrolTarget&&!bot.target&&!bot.pickupTarget?findPathStep(match.world,bot,bot.patrolTarget):null;
   }

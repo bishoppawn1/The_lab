@@ -1,5 +1,5 @@
-import { createFacility } from './facility.js?v=20260927-8';
-import { WEAPONS, LOOT_TABLE, SUPPLY_LOOT, createArenaStarterKit, collectInventoryItem, consumeInventoryItem, healWithMedkit, isBlocked, hasLineOfSight, moveActor, changeDoorState, canSeeOpponent, canFireAt, scoreVisibleTarget, findPathStep, steerActor, updateArenaBot, revealTiles, createGunProjectiles, advanceProjectile, applyDamage, recordElimination, winningTeam, botWeaponScore as scoreBotWeapon, botWeaponPlan as planBotWeapon, botCanTakeLoot as botAcceptsLoot } from './arena-core.js?v=20260927-8';
+import { createFacility } from './facility.js?v=20261001-1';
+import { WEAPONS, LOOT_TABLE, SUPPLY_LOOT, createArenaStarterKit, createBotStarterKit, collectInventoryItem, consumeInventoryItem, healWithMedkit, isBlocked, hasLineOfSight, moveActor, changeDoorState, canSeeOpponent, canFireAt, scoreVisibleTarget, findPathStep, steerActor, updateArenaBot, revealTiles, createGunProjectiles, advanceProjectile, applyDamage, recordElimination, winningTeam, botWeaponScore as scoreBotWeapon, botWeaponPlan as planBotWeapon, botCanTakeLoot as botAcceptsLoot } from './arena-core.js?v=20261001-1';
 const $ = (selector) => document.querySelector(selector);
 const canvas = $('#world');
 const ctx = canvas.getContext('2d');
@@ -7,9 +7,8 @@ const minimap = $('#minimap');
 const mctx = minimap.getContext('2d');
 const menu = $('#menu'), setup = $('#setup'), game = $('#game');
 const COLORS = { floor:'#202a22', floor2:'#222d24', wall:'#414d42', wallEdge:'#60705e', grid:'#ffffff07', lime:'#c0ef75', red:'#f2745e', blue:'#72a9ed', pale:'#e8ede7' };
-const PLAYER_VIEW_TILES = 14;
 const PLAYER_SIGHT_RANGE = 320;
-const BOT_SIGHT_RANGE = PLAYER_VIEW_TILES * 32;
+const BOT_SIGHT_RANGE = 9 * 32;
 const LOOT_RESPAWN_SECONDS = 6;
 const AMBIENT_LOOT_INTERVAL = 7;
 const AMBIENT_LOOT_LIMIT = 20;
@@ -152,7 +151,11 @@ function seedRoomLoot(){
   for(const room of state.world.rooms){
     if(room.name==='ARMORY')for(const family of [0,1,2,3])addRoomLoot(room,'weapon',weightedLoot(LOOT_TABLE.filter(item=>item.type==='weapon'&&WEAPONS[item.weapon].family===family)).weapon);
     else if(room.name==='MEDICAL'){for(let i=0;i<3;i++)addRoomLoot(room,'health');addRoomLoot(room,'armor');}
-    else if(room.name==='STORAGE'){addRoomLoot(room,'grenade');addRoomLoot(room,'armor');}
+    else if(room.name==='SUPPLY HUB'){
+      for(const weapon of [1,2,3,7,8,9])addRoomLoot(room,'weapon',weapon);
+      for(let i=0;i<2;i++){addRoomLoot(room,'health');addRoomLoot(room,'armor');}
+      addRoomLoot(room,'grenade');
+    }
     else if(room.name==='WORKSHOP')addRoomLoot(room,'weapon',16);
     else if(room.name==='POWER STATION')addRoomLoot(room,'armor');
     else if(room.name==='RESEARCH LAB')addRoomLoot(room,'health');
@@ -181,7 +184,8 @@ function respawnPool(item){
   if(item.room==='ARMORY')return LOOT_TABLE.filter(spec=>spec.type==='weapon'&&WEAPONS[spec.weapon].kind==='gun');
   if(item.room==='WORKSHOP')return LOOT_TABLE.filter(spec=>spec.type==='weapon'&&WEAPONS[spec.weapon].kind==='melee');
   if(item.room==='MEDICAL')return LOOT_TABLE.filter(spec=>spec.type==='health'||spec.type==='armor');
-  if(['STORAGE','POWER STATION','RESEARCH LAB'].includes(item.room))return SUPPLY_LOOT;
+  if(item.room==='SUPPLY HUB')return LOOT_TABLE;
+  if(['POWER STATION','RESEARCH LAB'].includes(item.room))return SUPPLY_LOOT;
   return LOOT_TABLE;
 }
 function respawnLoot(){for(let i=state.lootRespawns.length-1;i>=0;i--){
@@ -324,7 +328,7 @@ function updateRemote(now){
   remote.actions={};remote.nextInputAt=now+33;
 }
 function arenaStarterKit(){return createArenaStarterKit(Math.random);}
-function spawnBot(team,i){const zone=state.world.spawnZones[team==='blue'?0:1],pos=findOpen(zone.x/32,zone.y/32,0,7);const b={...pos,team,ai:true,alive:true,r:10,hp:100,maxHp:100,speed:rand(85,115),...arenaStarterKit(),pickedSlots:[false,false,false,false],pickedArmor:false,angle:0,fireTime:rand(0,500),stun:0,invuln:0,respawn:0,id:`${team}${i}`,kills:0,target:null,think:rand(0,1)};state.bots.push(b);}
+function spawnBot(team,i){const zone=state.world.spawnZones[team==='blue'?0:1],pos=findOpen(zone.x/32,zone.y/32,0,7);const b={...pos,team,ai:true,alive:true,r:10,hp:100,maxHp:100,speed:rand(85,115),...createBotStarterKit(Math.random),pickedSlots:[false,false,false,false],pickedArmor:false,angle:0,fireTime:rand(0,500),stun:0,invuln:0,respawn:0,id:`${team}${i}`,kills:0,target:null,think:rand(0,1)};state.bots.push(b);}
 function spawnEnemy(type='monster',room=null,chosenVariant=null){
   const origin=state.player||{x:40*32,y:32*32};
   const corridor=(x,y)=>!state.world.rooms.some(candidate=>x>=candidate.x&&x<candidate.x+candidate.w&&y>=candidate.y&&y<candidate.y+candidate.h);
@@ -398,7 +402,7 @@ function advanceBullet(bullet,dt){
   const target=advanceProjectile(state.world,bullet,dt,bulletTargets(bullet));
   if(target)hit(target,bullet.damage,bullet.owner);
 }
-function updateVision(now){const world=state.world;if(now-world.visionAt<180)return;world.visionAt=now;const p=state.player,observers=p?.alive?[p]:[];if(state.mode==='pvp')observers.push(...state.bots.filter(b=>b.alive&&b.team===p.team));else observers.push(...state.enemies.filter(e=>e.alive&&e.type==='guard'&&e.team===p.team));world.visible=revealTiles(world,observers.map(actor=>({actor,radius:actor===p?PLAYER_VIEW_TILES:state.mode==='pvp'?9:8})));for(const key of world.visible)world.explored.add(key);}
+function updateVision(now){const world=state.world;if(now-world.visionAt<180)return;world.visionAt=now;const p=state.player,observers=p?.alive?[p]:[];if(state.mode==='pvp')observers.push(...state.bots.filter(b=>b.alive&&b.team===p.team));else observers.push(...state.enemies.filter(e=>e.alive&&e.type==='guard'&&e.team===p.team));world.visible=revealTiles(world,observers.map(actor=>({actor,radius:actor===p?Infinity:state.mode==='pvp'?9:8})));for(const key of world.visible)world.explored.add(key);}
 function move(e,dx,dy){moveActor(state.world,e,dx,dy);}
 function reloadWeapon(now=performance.now()){if(state.remote){queueRemoteAction('reload');return;}const p=state.player,id=p?.inventory[p.active],w=id==null?null:WEAPONS[id];if(!p||!w||w.kind!=='gun'||(p.ammo[id]??w.magazine)>=w.magazine||p.reloadUntil>now)return;p.reloadingWeapon=id;p.reloadUntil=now+(w.family===2&&w.name!=='Auto Shotgun'?1050:780);$('#reload-status').textContent='RELOADING…';log(`${w.name} reloading.`);}
 function shoot(entity,angle,now){
@@ -518,7 +522,7 @@ function canSeePlayer(actor){return state.player?.alive&&dist(actor,state.player
 function firingLaneClear(actor,target){return canFireAt(state.world,actor,target);}
 function nextPathStep(actor,target){return findPathStep(state.world,actor,target);}
 function steerToward(actor,target,pathPoint,speed,dt,requireLane=false){steerActor(state.world,actor,target,pathPoint,speed,dt,requireLane);}
-function respawnBot(b){const zone=state.world.spawnZones[b.team==='blue'?0:1],p=findOpen(zone.x/32,zone.y/32,0,5),kit=arenaStarterKit();b.x=p.x;b.y=p.y;b.hp=100;b.armor=25;b.alive=true;b.invuln=.55;b.respawn=0;b.inventory=kit.inventory;b.ammo=kit.ammo;b.pickedSlots=[false,false,false,false];b.pickedArmor=false;b.active=kit.active;b.target=null;b.recentAttacker=null;b.pathPoint=null;b.patrolTarget=null;b.lootJudgments=new WeakMap();b.think=0;b.fireTime=performance.now()+500;}
+function respawnBot(b){const zone=state.world.spawnZones[b.team==='blue'?0:1],p=findOpen(zone.x/32,zone.y/32,0,5),kit=createBotStarterKit(Math.random);b.x=p.x;b.y=p.y;b.hp=100;b.armor=25;b.alive=true;b.invuln=.55;b.respawn=0;b.inventory=kit.inventory;b.ammo=kit.ammo;b.pickedSlots=[false,false,false,false];b.pickedArmor=false;b.active=kit.active;b.target=null;b.recentAttacker=null;b.pathPoint=null;b.patrolTarget=null;b.patrolRoom=null;b.exploredRooms=new Set();b.lootJudgments=new WeakMap();b.think=0;b.fireTime=performance.now()+500;}
 function respawnPlayer(){const p=state.player,zone=state.world.spawnZones[p.team==='blue'?0:1],pos=findOpen(zone.x/32,zone.y/32,0,5),kit=arenaStarterKit();p.x=pos.x;p.y=pos.y;p.hp=100;p.armor=25;p.alive=true;p.invuln=.65;p.respawn=0;p.inventory=kit.inventory;p.ammo=kit.ammo;p.active=kit.active;p.starterWeapon=kit.inventory[1];announce('OPERATOR BACK IN THE FIGHT');renderWeapons();}
 function burst(x,y,color,n){for(let i=0;i<n;i++)state.particles.push({x,y,vx:rand(-95,95),vy:rand(-95,95),life:rand(.12,.42),max:.42,color,r:rand(1,3)});}
 function muzzle(x,y,color){for(let i=0;i<3;i++)state.particles.push({x,y,vx:rand(-30,30),vy:rand(-30,30),life:.07,max:.07,color,r:rand(2,4)});}
@@ -607,7 +611,6 @@ function render(now){const W=Number(canvas.dataset.cssWidth)||600,H=Number(canva
   for(const b of state.bullets){const x=b.x-state.camera.x,y=b.y-state.camera.y;ctx.save();ctx.translate(x,y);ctx.rotate(Math.atan2(b.vy,b.vx));ctx.shadowColor=b.color;ctx.shadowBlur=9;ctx.strokeStyle=b.color;ctx.lineWidth=b.acid?3:2;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(-15,0);ctx.lineTo(-3,0);ctx.stroke();ctx.fillStyle=b.acid?'#b5f28a':'#fff5d8';ctx.beginPath();ctx.ellipse(0,0,b.acid?3.3:3,b.acid?2.3:1.6,0,0,Math.PI*2);ctx.fill();ctx.restore();}
   for(const e of state.enemies)if(e.alive&&unitVisibleToTeam(e))drawEntity(e,e.type==='monster'?'#cf6350':e.team===state.player.team?COLORS.blue:'#bb7459',now,e.type==='guard'?(e.team===state.player.team?'ALLY GUARD':'GUARD'):e.variant?.toUpperCase()||'');for(const b of state.bots)if(b.alive&&unitVisibleToTeam(b))drawEntity(b,b.team==='blue'?COLORS.blue:COLORS.red,now,b.team===state.player.team?'ALLY':'HOSTILE');if(state.player?.alive)drawEntity(state.player,COLORS.lime,now,'YOU');for(const part of state.particles){const x=part.x-state.camera.x,y=part.y-state.camera.y;ctx.globalAlpha=clamp(part.life/part.max,0,1);ctx.fillStyle=part.color;if(part.grenade){ctx.beginPath();ctx.arc(x,y,part.r,0,Math.PI*2);ctx.fill();}else{ctx.beginPath();ctx.arc(x,y,part.r,0,Math.PI*2);ctx.fill();}}ctx.globalAlpha=1;
   drawVisionFog(sx,sy,ex,ey);drawDoors();
-  if(state.mode==='survival'&&!state.visibleMap){const px=state.player.x-state.camera.x,py=state.player.y-state.camera.y;const gradient=ctx.createRadialGradient(px,py,120,px,py,(PLAYER_VIEW_TILES+2)*t);gradient.addColorStop(0,'#0000');gradient.addColorStop(.65,'#0002');gradient.addColorStop(1,'#060907c9');ctx.fillStyle=gradient;ctx.fillRect(0,0,W,H);}
   if(state.visibleMap)drawFullMap(W,H);}
 function drawHeldWeapon(id){const w=WEAPONS[id]||WEAPONS[0];ctx.save();ctx.lineCap='round';ctx.lineJoin='round';if(w.kind==='gun'){ctx.fillStyle='#131a16';ctx.strokeStyle='#c8d0c3';ctx.lineWidth=.8;ctx.beginPath();ctx.roundRect(2,-3.7,20,7.4,1);ctx.fill();ctx.stroke();ctx.fillStyle=w.color;if(w.family===0){ctx.fillRect(6,-4,12,2);ctx.fillRect(21,-1.7,7,3.4);ctx.fillStyle='#343c35';ctx.beginPath();ctx.moveTo(11,3);ctx.lineTo(17,3);ctx.lineTo(19,9);ctx.lineTo(14,9);ctx.closePath();ctx.fill();}
     else if(w.family===1){ctx.fillRect(3,-2,5,2);ctx.fillRect(6,-5,14,2);ctx.fillRect(21,-1.6,8,3.2);ctx.fillStyle='#343c35';ctx.fillRect(11,3,4,6);ctx.fillRect(1,1,4,4);if(id===12){ctx.fillStyle=w.color;ctx.beginPath();ctx.arc(15,6,5,0,Math.PI*2);ctx.fill();}}
@@ -640,10 +643,12 @@ function drawLoot(item){const x=item.x-state.camera.x,y=item.y-state.camera.y+Ma
   ctx.restore();if(dist(item,state.player)<230){ctx.font='7px "IBM Plex Mono"';ctx.textAlign='center';ctx.fillStyle=item.color;ctx.fillText(item.label,x,y+24);}}
 function visibleAt(x,y){return state.world.visible.has(`${Math.floor(x/32)},${Math.floor(y/32)}`);}
 function unitVisibleToTeam(unit){return unit===state.player||visibleAt(unit.x,unit.y);}
+function enemySpawnZone(){return state.world.spawnZones[state.player.team==='blue'?1:0];}
 function drawMinimap(){
   const W=minimap.width,H=minimap.height,w=state.world.w,h=state.world.h,tw=W/w,th=H/h; mctx.clearRect(0,0,W,H);mctx.fillStyle='#101612';mctx.fillRect(0,0,W,H);
   for(let y=0;y<h;y++)for(let x=0;x<w;x++){const key=`${x},${y}`,px=x*tw,py=y*th;if(!floorTile(x,y)){mctx.fillStyle='#465346';mctx.fillRect(px,py,tw+.4,th+.4);}else if(state.world.explored.has(key)){mctx.fillStyle=state.world.visible.has(key)?'#526b4d':'#202a22';mctx.fillRect(px,py,tw+.4,th+.4);}}
   for(const door of state.world.doors)if(visibleAt(door.approach.x,door.approach.y)||state.world.explored.has(`${Math.floor(door.approach.x/32)},${Math.floor(door.approach.y/32)}`)){mctx.fillStyle=door.open?'#91bd8d':'#e2bf6d';mctx.fillRect(door.x*tw,door.y*th,Math.max(2,tw*2),Math.max(2,th));}
+  if(state.mode==='pvp'){const zone=enemySpawnZone(),x=zone.x/32*tw,y=zone.y/32*th;mctx.fillStyle='#f2745e88';mctx.fillRect(x-7,y-7,14,14);mctx.strokeStyle='#ff493d';mctx.lineWidth=2;mctx.strokeRect(x-7,y-7,14,14);}
   const p=state.player;if(state.mode==='survival'&&state.world.explored.has(`${Math.floor(state.world.exit.x/32)},${Math.floor(state.world.exit.y/32)}`)){mctx.fillStyle=COLORS.lime;mctx.beginPath();mctx.arc(state.world.exit.x/32*tw,state.world.exit.y/32*th,3,0,Math.PI*2);mctx.fill();}
   const units=state.mode==='pvp'?state.bots:state.enemies;for(const unit of units)if(unit.alive&&visibleAt(unit.x,unit.y)){mctx.fillStyle=unit.team===p.team?COLORS.lime:COLORS.red;mctx.fillRect(unit.x/32*tw-1.5,unit.y/32*th-1.5,3,3);}
   mctx.fillStyle=COLORS.lime;mctx.beginPath();mctx.arc(p.x/32*tw,p.y/32*th,3,0,Math.PI*2);mctx.fill();mctx.strokeStyle='#bbc7ae77';mctx.lineWidth=1;mctx.strokeRect(state.camera.x/(w*32)*W,state.camera.y/(h*32)*H,(Number(canvas.dataset.cssWidth)||600)/(w*32)*W,(Number(canvas.dataset.cssHeight)||400)/(h*32)*H);
@@ -652,6 +657,7 @@ function drawFullMap(W,H){
   ctx.save();ctx.fillStyle='#090d0bf7';ctx.fillRect(0,0,W,H);const pad=24,scale=Math.min((W-pad*2)/(state.world.w*32),(H-pad*2)/(state.world.h*32)),mw=state.world.w*32*scale,mh=state.world.h*32*scale,ox=(W-mw)/2,oy=(H-mh)/2;
   for(let y=0;y<state.world.h;y++)for(let x=0;x<state.world.w;x++){const key=`${x},${y}`,px=ox+x*32*scale,py=oy+y*32*scale;if(!floorTile(x,y)){ctx.fillStyle='#465346';ctx.fillRect(px,py,32*scale+.5,32*scale+.5);}else if(state.world.explored.has(key)){ctx.fillStyle=state.world.visible.has(key)?'#526b4d':'#202a22';ctx.fillRect(px,py,32*scale+.5,32*scale+.5);}}
   for(const door of state.world.doors)if(visibleAt(door.approach.x,door.approach.y)||state.world.explored.has(`${Math.floor(door.approach.x/32)},${Math.floor(door.approach.y/32)}`)){ctx.fillStyle=door.open?'#91bd8d':'#e2bf6d';ctx.fillRect(ox+door.x*32*scale,oy+door.y*32*scale,Math.max(2,64*scale),Math.max(2,32*scale));}
+  if(state.mode==='pvp'){const zone=enemySpawnZone(),x=ox+zone.x*scale,y=oy+zone.y*scale;ctx.fillStyle='#f2745e88';ctx.fillRect(x-9,y-9,18,18);ctx.strokeStyle='#ff493d';ctx.lineWidth=2;ctx.strokeRect(x-9,y-9,18,18);}
   ctx.save();ctx.font=`${Math.max(5,Math.min(8,scale*48))}px "IBM Plex Mono"`;ctx.textAlign='center';ctx.fillStyle='#d5dec588';for(const label of state.world.labels||[])if(state.world.explored.has(`${Math.floor(label.x/32)},${Math.floor(label.y/32)}`))ctx.fillText(label.text,ox+label.x*scale,oy+label.y*scale);ctx.restore();
   if(state.mode==='survival'&&state.world.explored.has(`${Math.floor(state.world.exit.x/32)},${Math.floor(state.world.exit.y/32)}`)){ctx.fillStyle=COLORS.lime;ctx.beginPath();ctx.arc(ox+state.world.exit.x*scale,oy+state.world.exit.y*scale,4,0,Math.PI*2);ctx.fill();}
   const units=state.mode==='pvp'?state.bots:state.enemies;for(const unit of units)if(unit.alive&&visibleAt(unit.x,unit.y)){ctx.fillStyle=unit.team===state.player.team?COLORS.lime:COLORS.red;ctx.beginPath();ctx.arc(ox+unit.x*scale,oy+unit.y*scale,3,0,Math.PI*2);ctx.fill();}

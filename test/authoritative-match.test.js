@@ -78,6 +78,18 @@ test('doors and fog are decided by server positions, not input claims',()=>{
   assert.deepEqual(match.snapshot(blue.id).doors,[{index:0,open:true}]);
 });
 
+test('authoritative snapshots reveal a distant clear lane but hide enemies behind walls',()=>{
+  const match=new AuthoritativeMatch({seed:31}),blue=match.addPlayer('blue'),red=match.addPlayer('red');
+  match.world={w:40,h:7,tile:32,map:Array.from({length:7},(_,y)=>Array.from({length:40},(_,x)=>x===0||y===0||x===39||y===6?1:0)),doors:[],doorTiles:new Map(),coverGrid:new Map()};
+  match.bots=[];
+  Object.assign(blue,{x:3.5*32,y:3.5*32});
+  Object.assign(red,{x:30.5*32,y:3.5*32});
+  assert.equal(match.snapshot(blue.id).units.some(unit=>unit.id===red.id),true);
+  match.world.map[3][17]=1;
+  match.visionCache.clear();
+  assert.equal(match.snapshot(blue.id).units.some(unit=>unit.id===red.id),false);
+});
+
 test('picked gear drops on death, grenades consume a slot, and score ends the match',()=>{
   const match=new AuthoritativeMatch({seed:31,target:50}),blue=match.addPlayer('blue'),red=match.addPlayer('red');
   openArena(match);

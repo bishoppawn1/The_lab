@@ -248,7 +248,7 @@ function startRoomMatch(snapshot){
   startLocalGame(welcome.seed);
   state.remote={socket,id:welcome.id,nextInputAt:0,actions:{}};
   applyRemoteSnapshot(snapshot);
-  $('#mode-label').textContent=`DEV MATCH · ${state.teamSize}V${state.teamSize}`;
+  $('#mode-label').textContent=`${usesLocalRooms()?'DEV':'ONLINE'} MATCH · ${state.teamSize}V${state.teamSize}`;
   $('#teams-line').textContent=`ROOM ${welcome.code} · SERVER MATCH`;
   log(`Room ${welcome.code} is live.`, 'good');
 }

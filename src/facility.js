@@ -63,6 +63,7 @@ export function createFacility(mode,seed){
   let themeIndex=0;const otherNames=names.filter(name=>name!=='STORAGE');
   rooms.forEach((room,index)=>{
     room.name=index===0?'ENTRY BAY':index===rooms.length-1?'EXTRACTION BAY':room===hub?'SUPPLY HUB':otherNames[themeIndex++];
+    room.lightsOn=true;
     carve(room.x+1,room.y+1,room.x+room.w-2,room.y+room.h-2);
     const section=roomSections.get(room),doorX=room.x+Math.floor(rand(3,room.w-4)),south=random()<.5;
     const boundaryY=south?room.y+room.h-1:room.y,corridorY=south?section.y+section.h+1:section.y-2;
@@ -83,8 +84,17 @@ export function createFacility(mode,seed){
     const tx=Math.floor(rand(room.x+2,room.x+room.w-2)),ty=Math.floor(rand(room.y+2,room.y+room.h-2)),x=(tx+.5)*32,y=(ty+.5)*32;
     if(!floorTile(tx,ty)||Math.hypot(x-center(room).x,y-center(room).y)<68||roomProps.some(prop=>dist(prop,{x,y})<56))continue;
     const dimensions=kind==='tank'?[12,14]:kind==='generator'?[14,14]:[14,11];
-    roomProps.push({x,y,kind,solid:kind!=='nest',halfW:dimensions[0],halfH:dimensions[1]});break;
+    roomProps.push({x,y,kind,roomName:room.name,solid:kind!=='nest',halfW:dimensions[0],halfH:dimensions[1]});break;
   }}
+  const terminals=[];
+  for(const [roomName,action,targets] of [
+    ['CONTROL ROOM','doors',['ARMORY','MEDICAL','QUARANTINE']],
+    ['POWER STATION','lights',['POWER STATION','CONTROL ROOM','SERVER ROOM','RESEARCH LAB']],
+  ]){
+    const prop=roomProps.find(item=>item.roomName===roomName);
+    if(prop){prop.terminal={action,targets,active:false};terminals.push(prop);}
+  }
+  world.terminals=terminals;
   const coverGrid=new Map();
   for(const prop of roomProps)if(prop.solid)coverGrid.set(`${Math.floor(prop.x/32)},${Math.floor(prop.y/32)}`,prop);
   world.coverGrid=coverGrid;

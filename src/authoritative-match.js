@@ -2,7 +2,7 @@ import { createFacility, createSeededRandom } from './facility.js';
 import {
   WEAPONS, LOOT_TABLE, SUPPLY_LOOT, createArenaStarterKit, createBotStarterKit, collectInventoryItem,
   consumeInventoryItem, healWithMedkit, isBlocked, hasLineOfSight, moveActor,
-  changeDoorState, updateArenaBot, revealTiles, createGunProjectiles,
+  changeDoorState, nearbyTerminal, operateTerminal, updateArenaBot, revealTiles, createGunProjectiles,
   advanceProjectile, applyDamage, recordElimination, winningTeam, botCanTakeLoot,
   botWeaponPlan,
 } from './arena-core.js';
@@ -199,6 +199,8 @@ export class AuthoritativeMatch {
     actor.interactAt=this.elapsed+.2;
     const door=this.nearbyDoor(actor);
     if(door&&!door.open){changeDoorState(this.world,door,true,this.fighters);return;}
+    const terminal=nearbyTerminal(this.world,actor);
+    if(terminal){operateTerminal(this.world,terminal,this.fighters);return;}
     const item=this.loot.filter(loot=>distance(actor,loot)<39&&hasLineOfSight(this.world,actor,loot)).sort((a,b)=>distance(actor,a)-distance(actor,b))[0];
     if(item){this.collect(actor,item);return;}
     if(door)changeDoorState(this.world,door,false,this.fighters);
@@ -335,6 +337,8 @@ export class AuthoritativeMatch {
       bullets:this.bullets.filter(bullet=>seen(bullet)).map(bullet=>({x:bullet.x,y:bullet.y,vx:bullet.vx,vy:bullet.vy,color:bullet.color})),
       loot:this.loot.filter(seen).map(item=>({id:item.id,x:item.x,y:item.y,r:item.r,type:item.type,weapon:item.weapon,count:item.count,label:item.label,color:item.color})),
       doors:this.world.doors.map((door,index)=>({door,index})).filter(({door})=>visible.has(`${door.x},${door.y}`)||visible.has(`${door.x+1},${door.y}`)).map(({door,index})=>({index,open:door.open})),
+      roomLights:this.world.rooms?.map(room=>room.lightsOn!==false)||[],
+      terminals:this.world.terminals?.map((terminal,index)=>({index,active:terminal.terminal.active}))||[],
     };
   }
 }

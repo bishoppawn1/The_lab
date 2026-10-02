@@ -4,7 +4,7 @@ import { createFacility, createSeededRandom } from '../src/facility.js';
 import {
   WEAPONS, createArenaStarterKit, createBotStarterKit, collectInventoryItem, consumeInventoryItem, healWithMedkit,
   botWeaponPlan, updateArenaBot, isBlocked, hasLineOfSight, moveActor, findPathStep,
-  changeDoorState, canSeeOpponent, revealTiles, createGunProjectiles,
+  changeDoorState, nearbyTerminal, operateTerminal, canSeeOpponent, revealTiles, createGunProjectiles,
   advanceProjectile, applyDamage, recordElimination, winningTeam,
 } from '../src/arena-core.js';
 
@@ -39,6 +39,34 @@ test('shared collision, doors, and team vision agree about a blocked passage', (
   assert.equal(changeDoorState(world,door,false,[blue,red]),true);
   moveActor(world,blue,0,32);
   assert.equal(blue.y,3.5*32);
+});
+
+test('facility computers switch selected lights and doors from a reachable position', () => {
+  const {world}=createFacility('survival',20261002);
+  const actorBeside=terminal=>{
+    for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+      const actor={x:terminal.x+dx*(terminal.halfW+14),y:terminal.y+dy*(terminal.halfH+14),r:10,alive:true};
+      if(!isBlocked(world,actor.x,actor.y,actor.r)&&nearbyTerminal(world,actor)===terminal)return actor;
+    }
+    throw new Error('Terminal cannot be reached');
+  };
+  const lights=world.terminals.find(prop=>prop.terminal.action==='lights');
+  const doors=world.terminals.find(prop=>prop.terminal.action==='doors');
+  assert.ok(lights&&doors);
+  actorBeside(lights);actorBeside(doors);
+  assert.equal(operateTerminal(world,lights),true);
+  assert.ok(world.rooms.filter(room=>lights.terminal.targets.includes(room.name)).every(room=>room.lightsOn===false));
+  assert.equal(operateTerminal(world,lights),true);
+  assert.ok(world.rooms.every(room=>room.lightsOn));
+  assert.equal(operateTerminal(world,doors),true);
+  const controlledDoors=world.doors.filter(door=>doors.terminal.targets.includes(door.room.name));
+  assert.ok(controlledDoors.every(door=>door.open));
+  const blockedDoor=controlledDoors[0],blocker={x:blockedDoor.cx,y:blockedDoor.cy,r:10,alive:true};
+  assert.equal(operateTerminal(world,doors,[blocker]),false,'a blocked doorway prevents partial remote closure');
+  assert.equal(doors.terminal.active,true);
+  assert.ok(controlledDoors.every(door=>door.open));
+  assert.equal(operateTerminal(world,doors),true);
+  assert.ok(controlledDoors.every(door=>!door.open));
 });
 
 test('shared firearm, armor, death, and score rules resolve a fight without a browser', () => {

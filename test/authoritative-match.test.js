@@ -78,6 +78,23 @@ test('doors and fog are decided by server positions, not input claims',()=>{
   assert.deepEqual(match.snapshot(blue.id).doors,[{index:0,open:true}]);
 });
 
+test('room computer input changes server-owned lights and reaches clients in snapshots',()=>{
+  const match=new AuthoritativeMatch({seed:20261002}),player=match.addPlayer('blue');
+  match.bots=[];
+  const terminal=match.world.terminals.find(prop=>prop.terminal.action==='lights');
+  const index=match.world.terminals.indexOf(terminal);
+  player.x=terminal.x+terminal.halfW+14;player.y=terminal.y;
+  match.submitInput(player.id,{interact:true});
+  match.step(1/30);
+  assert.equal(terminal.terminal.active,true);
+  const snapshot=match.snapshot(player.id);
+  assert.equal(snapshot.terminals[index].active,true);
+  for(const roomName of terminal.terminal.targets){
+    const roomIndex=match.world.rooms.findIndex(room=>room.name===roomName);
+    assert.equal(snapshot.roomLights[roomIndex],false);
+  }
+});
+
 test('authoritative snapshots reveal a distant clear lane but hide enemies behind walls',()=>{
   const match=new AuthoritativeMatch({seed:31}),blue=match.addPlayer('blue'),red=match.addPlayer('red');
   match.world={w:40,h:7,tile:32,map:Array.from({length:7},(_,y)=>Array.from({length:40},(_,x)=>x===0||y===0||x===39||y===6?1:0)),doors:[],doorTiles:new Map(),coverGrid:new Map()};

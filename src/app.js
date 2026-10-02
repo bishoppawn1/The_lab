@@ -1,5 +1,5 @@
-import { createFacility } from './facility.js?v=20261001-1';
-import { WEAPONS, LOOT_TABLE, SUPPLY_LOOT, createArenaStarterKit, createBotStarterKit, collectInventoryItem, consumeInventoryItem, healWithMedkit, isBlocked, hasLineOfSight, moveActor, changeDoorState, canSeeOpponent, canFireAt, scoreVisibleTarget, findPathStep, steerActor, updateArenaBot, revealTiles, createGunProjectiles, advanceProjectile, applyDamage, recordElimination, winningTeam, botWeaponScore as scoreBotWeapon, botWeaponPlan as planBotWeapon, botCanTakeLoot as botAcceptsLoot } from './arena-core.js?v=20261001-1';
+import { createFacility } from './facility.js?v=20261002-3';
+import { WEAPONS, LOOT_TABLE, SUPPLY_LOOT, createArenaStarterKit, createBotStarterKit, collectInventoryItem, consumeInventoryItem, healWithMedkit, isBlocked, hasLineOfSight, moveActor, changeDoorState, nearbyTerminal, operateTerminal, canSeeOpponent, canFireAt, scoreVisibleTarget, findPathStep, steerActor, updateArenaBot, revealTiles, createGunProjectiles, advanceProjectile, applyDamage, recordElimination, winningTeam, botWeaponScore as scoreBotWeapon, botWeaponPlan as planBotWeapon, botCanTakeLoot as botAcceptsLoot } from './arena-core.js?v=20261002-3';
 const $ = (selector) => document.querySelector(selector);
 const canvas = $('#world');
 const ctx = canvas.getContext('2d');
@@ -14,9 +14,11 @@ const AMBIENT_LOOT_INTERVAL = 7;
 const AMBIENT_LOOT_LIMIT = 20;
 const GRENADE_THROW_DISTANCE = 210;
 const MELEE_SWING_MS = 300;
+const MINIMAP_INTERVAL_MS = 125;
+const HUD_INTERVAL_MS = 100;
 function weightedLoot(table=LOOT_TABLE){let value=Math.random()*table.reduce((sum,item)=>sum+item.weight,0);for(const item of table){value-=item.weight;if(value<=0)return item;}return table.at(-1);}
 
-const state = {running:false,paused:false,runId:0,mode:'survival',world:null,player:null,bots:[],enemies:[],bullets:[],loot:[],lootRespawns:[],lootBaseCount:0,lootSpawnTimer:0,ambientLootId:0,particles:[],decor:[],roomProps:[],keys:new Set(),mouse:{x:0,y:0,down:false},touchFire:false,camera:{x:0,y:0},lastTime:0,elapsed:0,fireAt:0,round:1,spawnTimer:0,scoreBlue:0,scoreRed:0,kills:0,found:0,skips:0,teamSize:5,feed:[],visibleMap:false,roundEnd:false,botFill:true,botSightRange:BOT_SIGHT_RANGE,pendingLoot:null,remote:null,lobby:null,roomAction:'create',settings:{team:'blue',target:50}};
+const state = {running:false,paused:false,runId:0,mode:'survival',world:null,player:null,bots:[],enemies:[],bullets:[],loot:[],lootRespawns:[],lootBaseCount:0,lootSpawnTimer:0,ambientLootId:0,particles:[],decor:[],roomProps:[],keys:new Set(),mouse:{x:0,y:0,down:false},touchFire:false,camera:{x:0,y:0},lastTime:0,nextMinimapAt:0,nextHudAt:0,elapsed:0,fireAt:0,round:1,spawnTimer:0,scoreBlue:0,scoreRed:0,kills:0,found:0,skips:0,teamSize:5,feed:[],visibleMap:false,roundEnd:false,botFill:true,botSightRange:BOT_SIGHT_RANGE,pendingLoot:null,remote:null,lobby:null,roomAction:'create',settings:{team:'blue',target:50}};
 let lastNotice=0, audioContext=null;
 const rand=(a,b)=>a+Math.random()*(b-a), clamp=(n,a,b)=>Math.max(a,Math.min(b,n)), dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y), choice=a=>a[Math.floor(Math.random()*a.length)];
 
@@ -209,7 +211,7 @@ function updateLootSpawns(dt){state.lootSpawnTimer+=dt;if(state.lootSpawnTimer>=
 function startLocalGame(seed){clearOperationUi();state.runId++;setup.classList.add('hidden');menu.classList.add('hidden');game.classList.remove('hidden');state.elapsed=0;state.kills=0;state.found=0;state.feed=[];state.visibleMap=false;state.bullets=[];state.lootRespawns=[];state.lootSpawnTimer=0;state.ambientLootId=0;state.particles=[];state.round=1;state.roundEnd=false;state.scoreBlue=0;state.scoreRed=0;state.player=null;generateWorld(state.mode,seed);state.player=buildPlayer();state.bots=[];state.enemies=[];state.spawnTimer=0;
   if(state.mode==='survival'){state.player.x=state.world.spawnZones[0].x;state.player.y=state.world.spawnZones[0].y;state.player.invuln=2.5;if(state.settings.difficulty==='training'){state.player.hp=state.player.maxHp=150;state.player.armor=20;}else if(state.settings.difficulty==='survival'){state.player.hp=state.player.maxHp=80;}spawnLoot(46);spawnEnemy('guard',state.world.rooms[0]);const threatTotal=state.settings.difficulty==='training'?2:state.settings.difficulty==='survival'?5:3;for(let i=0;i<threatTotal;i++)spawnEnemy('monster');seedRoomThreats();$('#mode-label').textContent='LAB ESCAPE';$('#objective-label').textContent='REACH EXTRACTION';$('#objective-detail').textContent='Explore the lab';$('#objective-detail').classList.remove('blue-text');$('#score-panel').classList.add('hidden');$('#map-status').textContent='— EXPLORE';log('You entered Facility 07-C. Find a way out.','good');log('Supplies are marked by their silhouettes. Press E to collect.','good');}
   else {spawnLoot(40);const playerColor=state.settings.team==='blue'?'blue':'red',enemyColor=playerColor==='blue'?'red':'blue';state.player.team=playerColor;state.player.x=state.world.spawnZones[playerColor==='blue'?0:1].x;state.player.y=state.world.spawnZones[playerColor==='blue'?0:1].y;for(let i=0;i<state.teamSize-1;i++)spawnBot(playerColor,i);for(let i=0;i<state.teamSize;i++)spawnBot(enemyColor,i);$('#mode-label').textContent=`TEAM DEATHMATCH · ${state.teamSize}V${state.teamSize}`;$('#objective-label').textContent=`FIRST TEAM TO ${state.settings.target} WINS`;$('#objective-detail').textContent=`Win ${state.settings.target} eliminations`;$('#score-target').textContent=`FIRST TO ${state.settings.target}`;$('#score-panel').classList.remove('hidden');$('#teams-line').textContent=`${state.teamSize}V${state.teamSize} · BOTS ACTIVE`;$('#map-status').textContent='— TEAM VISION';log(`${state.teamSize}v${state.teamSize} match active. AI squads deployed.`,'good');log('Collect gear, then fight for your team.');}
-  $('#threat-count').textContent=state.mode==='survival'?String(state.enemies.filter(e=>e.alive&&e.type==='monster').length):String(state.bots.length+1);$('#kill-count').textContent='0';$('#loot-count').textContent='0';$('#grenade-count').textContent=String(inventoryGrenades());$('#blue-score').textContent='0';$('#red-score').textContent='0';$('#health-value').textContent=String(state.player.hp);$('#health-bar').style.width='100%';$('#armor-value').textContent=`+ ${state.player.armor} ARM`;$('#armor-bar').style.width=`${state.player.armor}%`;renderWeapons();$('#event-log').innerHTML='';updateHUD();state.running=true;state.paused=false;state.lastTime=performance.now();resizeCanvas();const runId=state.runId;requestAnimationFrame(now=>frame(now,runId));}
+  $('#threat-count').textContent=state.mode==='survival'?String(state.enemies.filter(e=>e.alive&&e.type==='monster').length):String(state.bots.length+1);$('#kill-count').textContent='0';$('#loot-count').textContent='0';$('#grenade-count').textContent=String(inventoryGrenades());$('#blue-score').textContent='0';$('#red-score').textContent='0';$('#health-value').textContent=String(state.player.hp);$('#health-bar').style.width='100%';$('#armor-value').textContent=`+ ${state.player.armor} ARM`;$('#armor-bar').style.width=`${state.player.armor}%`;renderWeapons();$('#event-log').innerHTML='';updateHUD();state.running=true;state.paused=false;state.lastTime=performance.now();state.nextHudAt=0;state.nextMinimapAt=0;resizeCanvas();const runId=state.runId;requestAnimationFrame(now=>frame(now,runId));}
 function connectRoom(url){return new Promise((resolve,reject)=>{
   const socket=new WebSocket(url);
   const timeout=setTimeout(()=>{socket.close();fail('Room connection timed out');},5000);
@@ -301,11 +303,21 @@ function applyRemoteSnapshot(snapshot){
   if(!state.remote||snapshot.seed!==state.world.seed)return;
   state.elapsed=snapshot.elapsed;
   state.scoreBlue=snapshot.scoreBlue;state.scoreRed=snapshot.scoreRed;
+  const previousSelf={x:state.player.viewX??state.player.x,y:state.player.viewY??state.player.y};
+  const previousUnits=new Map(state.bots.map(unit=>[unit.id,{x:unit.viewX??unit.x,y:unit.viewY??unit.y}]));
   Object.assign(state.player,snapshot.self,{reloadUntil:snapshot.self.reloadUntil>snapshot.elapsed?performance.now()+(snapshot.self.reloadUntil-snapshot.elapsed)*1000:0});
+  const retainView=(unit,previous)=>{
+    const point=previous&&Math.hypot(unit.x-previous.x,unit.y-previous.y)<96?previous:unit;
+    unit.viewX=point.x;unit.viewY=point.y;
+  };
+  retainView(state.player,previousSelf);
   state.bots=snapshot.units;
+  for(const unit of state.bots)retainView(unit,previousUnits.get(unit.id));
   state.bullets=snapshot.bullets;
   state.loot=snapshot.loot;
   for(const doorState of snapshot.doors)state.world.doors[doorState.index].open=doorState.open;
+  for(const [index,lightsOn] of (snapshot.roomLights||[]).entries())if(state.world.rooms[index])state.world.rooms[index].lightsOn=lightsOn;
+  for(const {index,active} of snapshot.terminals||[])if(state.world.terminals?.[index])state.world.terminals[index].terminal.active=active;
   state.kills=snapshot.self.kills;
   $('#kill-count').textContent=String(state.kills);
   $('#blue-score').textContent=String(state.scoreBlue);
@@ -314,10 +326,15 @@ function applyRemoteSnapshot(snapshot){
   if(snapshot.winner&&state.running)finish(snapshot.winner===state.player.team,`${snapshot.winner.toUpperCase()} TEAM WINS`,`Final score ${state.scoreBlue} : ${state.scoreRed}`);
 }
 function queueRemoteAction(name,value=true){if(state.remote)state.remote.actions[name]=value;}
-function updateRemote(now){
+function updateRemote(now,dt=0){
   const p=state.player;if(!p)return;
+  const follow=1-Math.exp(-dt*18);
+  for(const actor of [p,...state.bots]){
+    actor.viewX+=(actor.x-actor.viewX)*follow;
+    actor.viewY+=(actor.y-actor.viewY)*follow;
+  }
   const width=Number(canvas.dataset.cssWidth)||600,height=Number(canvas.dataset.cssHeight)||400;
-  state.camera.x=clamp(p.x-width/2,0,state.world.w*32-width);state.camera.y=clamp(p.y-height/2,0,state.world.h*32-height);
+  state.camera.x=clamp(p.viewX-width/2,0,state.world.w*32-width);state.camera.y=clamp(p.viewY-height/2,0,state.world.h*32-height);
   updateVision(now);
   const pointer=state.mouse;
   if(state.touchFire){const target=state.bots.filter(unit=>unit.alive&&unit.team!==p.team).sort((a,b)=>dist(p,a)-dist(p,b))[0];if(target)p.angle=Math.atan2(target.y-p.y,target.x-p.x);}
@@ -357,7 +374,7 @@ function setBanner(text){const el=$('#round-banner'),runId=state.runId;el.textCo
 function sound(freq=180,type='square',duration=.045,volume=.025){try{audioContext??=new(window.AudioContext||window.webkitAudioContext)();const osc=audioContext.createOscillator(),gain=audioContext.createGain();osc.type=type;osc.frequency.value=freq;gain.gain.setValueAtTime(volume,audioContext.currentTime);gain.gain.exponentialRampToValueAtTime(.001,audioContext.currentTime+duration);osc.connect(gain);gain.connect(audioContext.destination);osc.start();osc.stop(audioContext.currentTime+duration);}catch{}}
 
 function resizeCanvas(){const rect=canvas.getBoundingClientRect();if(!rect.width||!rect.height)return;const dpr=Math.min(window.devicePixelRatio||1,2);canvas.width=Math.round(rect.width*dpr);canvas.height=Math.round(rect.height*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);canvas.dataset.cssWidth=rect.width;canvas.dataset.cssHeight=rect.height;}
-function frame(now,runId){if(!state.running||runId!==state.runId)return;requestAnimationFrame(next=>frame(next,runId));if(state.paused)return;const dt=Math.min((now-state.lastTime)/1000,.045);state.lastTime=now;if(state.remote)updateRemote(now);else{state.elapsed+=dt;update(dt,now);}render(now);updateHUD();drawMinimap();if(!$('#notice').classList.contains('hidden')&&now-lastNotice>1600)$('#notice').classList.add('hidden');}
+function frame(now,runId){if(!state.running||runId!==state.runId)return;requestAnimationFrame(next=>frame(next,runId));if(state.paused)return;const dt=Math.min((now-state.lastTime)/1000,.045);state.lastTime=now;if(state.remote)updateRemote(now,dt);else{state.elapsed+=dt;update(dt,now);}render(now);if(now>=state.nextHudAt){updateHUD();state.nextHudAt=now+HUD_INTERVAL_MS;}if(now>=state.nextMinimapAt){drawMinimap();state.nextMinimapAt=now+MINIMAP_INTERVAL_MS;}if(!$('#notice').classList.contains('hidden')&&now-lastNotice>1600)$('#notice').classList.add('hidden');}
 function update(dt,now){const p=state.player;if(!p)return;const cx=Number(canvas.dataset.cssWidth)||600,cy=Number(canvas.dataset.cssHeight)||400;state.camera.x=clamp(p.x-cx/2,0,state.world.w*32-cx);state.camera.y=clamp(p.y-cy/2,0,state.world.h*32-cy);updateVision(now);const pointer=state.mouse;const sx=pointer.x+state.camera.x,sy=pointer.y+state.camera.y;if(state.touchFire){const targets=state.mode==='pvp'?state.bots.filter(b=>b.alive&&b.team!==p.team):state.enemies.filter(e=>e.alive);const target=targets.sort((a,b)=>dist(p,a)-dist(p,b))[0];if(target)p.angle=Math.atan2(target.y-p.y,target.x-p.x);}else p.angle=Math.atan2(sy-p.y,sx-p.x);if(p.invuln>0)p.invuln=Math.max(0,p.invuln-dt);if(p.hitFlash>0)p.hitFlash=Math.max(0,p.hitFlash-dt);if(p.reloadUntil>0&&now>=p.reloadUntil){const id=p.reloadingWeapon,w=WEAPONS[id];if(w?.kind==='gun')p.ammo[id]=w.magazine;p.reloadUntil=0;p.reloadingWeapon=null;log(`${w?.name||'Weapon'} reloaded.`,'good');renderWeapons();}if(p.stun>0)p.stun-=dt;
   let mx=(state.keys.has('d')||state.keys.has('arrowright')?1:0)-(state.keys.has('a')||state.keys.has('arrowleft')?1:0);let my=(state.keys.has('s')||state.keys.has('arrowdown')?1:0)-(state.keys.has('w')||state.keys.has('arrowup')?1:0);const mag=Math.hypot(mx,my);if(p.alive&&mag){mx/=mag;my/=mag;move(p,mx*p.speed*dt,my*p.speed*dt);}
   if(p.alive&&(pointer.down||state.keys.has(' '))&&now>state.fireAt)shoot(p,p.angle,now);for(const bot of state.bots)if(bot.alive)updateBot(bot,dt,now);else{bot.respawn-=dt;if(bot.respawn<=0)respawnBot(bot);}
@@ -388,6 +405,8 @@ function nearbyInteraction(){
   if(state.mode==='survival'&&dist(p,state.world.exit)<state.world.exit.r+15)return{type:'exit'};
   const door=nearbyDoor(p);
   if(door&&!door.open)return{type:'door',door};
+  const terminal=nearbyTerminal(state.world,p);
+  if(terminal)return{type:'terminal',terminal};
   const item=state.loot.filter(item=>dist(p,item)<39&&visibleAt(item.x,item.y)&&lineClear(p,item)).sort((a,b)=>dist(p,a)-dist(p,b))[0];
   if(item)return{type:'loot',item};
   return door?{type:'door',door}:null;
@@ -536,6 +555,12 @@ function interact(){
   if(!action){announce('NOTHING IN REACH');return;}
   if(action.type==='exit'){finish(true,'EXTRACTION CONFIRMED','You reached the extraction zone.');return;}
   if(action.type==='door'){setDoorOpen(action.door,!action.door.open,p);return;}
+  if(action.type==='terminal'){
+    const {terminal}=action;
+    if(!operateTerminal(state.world,terminal,[p,...state.bots,...state.enemies])){announce('DOORWAY BLOCKED — STEP CLEAR');return;}
+    const message=terminal.terminal.action==='lights'?(terminal.terminal.active?'ROOM LIGHTS OFF':'ROOM LIGHTS ON'):(terminal.terminal.active?'REMOTE DOORS OPEN':'REMOTE DOORS CLOSED');
+    announce(message);log(message,'good');return;
+  }
   const item=action.item,result=collectInventoryItem(p,item);
   if(!result.collected){
     state.pendingLoot=item;
@@ -568,7 +593,8 @@ function updateHUD(){
   const alive=state.mode==='survival'?state.enemies.filter(e=>e.alive&&e.type==='monster').length:state.bots.filter(b=>b.alive&&b.team!==p.team).length;
   $('#threat-count').textContent=String(alive);
   const action=nearbyInteraction();
-  const prompt=action?.type==='door'?`[ E ] ${action.door.open?'CLOSE':'OPEN'} ${action.door.room.name}`:action?.type==='exit'?'[ E ] EXTRACT':action?.type==='loot'?`[ E ] PICK UP ${action.item.label}`:'';
+  const terminal=action?.terminal?.terminal;
+  const prompt=action?.type==='door'?`[ E ] ${action.door.open?'CLOSE':'OPEN'} ${action.door.room.name}`:action?.type==='terminal'?`[ E ] ${terminal.action==='lights'?(terminal.active?'RESTORE':'SHUT OFF')+' LIGHTS':(terminal.active?'CLOSE':'OPEN')+' REMOTE DOORS'}`:action?.type==='exit'?'[ E ] EXTRACT':action?.type==='loot'?`[ E ] PICK UP ${action.item.label}`:'';
   $('#context-prompt').classList.toggle('hidden',!prompt);if(prompt)$('#context-prompt').textContent=prompt;
   if(state.mode==='survival')$('#objective-detail').textContent=dist(p,state.world.exit)<220?'Extraction zone nearby':`${Math.max(0,Math.round(dist(p,state.world.exit)/32))} m to extraction`;
 }
@@ -585,8 +611,14 @@ function drawRoomProps(){
     else if(prop.kind==='crate'||prop.kind==='bench'||prop.kind==='shelf'){ctx.fillStyle=prop.kind==='crate'?'#735b3e':prop.kind==='bench'?'#5c6c58':'#67716a';ctx.fillRect(-14,-11,28,22);ctx.strokeStyle='#c3b48b';ctx.strokeRect(-14,-11,28,22);ctx.beginPath();ctx.moveTo(-12,-8);ctx.lineTo(12,8);ctx.moveTo(12,-8);ctx.lineTo(-12,8);ctx.stroke();}
     else if(prop.kind==='generator'){ctx.fillStyle='#665d3b';ctx.beginPath();ctx.arc(0,0,14,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#d3bf6d';ctx.beginPath();ctx.arc(0,0,8,0,Math.PI*2);ctx.stroke();ctx.fillStyle='#e0ca71';ctx.fillRect(-2,-10,4,7);}
     else{ctx.fillStyle='#344943';ctx.fillRect(-15,-11,30,22);ctx.fillStyle=prop.kind==='server'?'#78bea3':'#80b7c9';ctx.fillRect(-11,-7,22,11);ctx.fillStyle='#b7e3c1';ctx.fillRect(-10,7,4,2);ctx.fillRect(-3,7,4,2);}
+    if(prop.terminal){ctx.strokeStyle=prop.terminal.active?'#f5c36e':'#c0ef75';ctx.lineWidth=2;ctx.strokeRect(-17,-13,34,26);ctx.fillStyle=ctx.strokeStyle;ctx.fillRect(-3,-17,6,3);}
     ctx.restore();
   }
+}
+function drawRoomLighting(){
+  ctx.save();ctx.fillStyle='#07100ba8';
+  for(const room of state.world.rooms)if(room.lightsOn===false)ctx.fillRect((room.x+1)*32-state.camera.x,(room.y+1)*32-state.camera.y,(room.w-2)*32,(room.h-2)*32);
+  ctx.restore();
 }
 function drawDoors(){
   for(const door of state.world.doors){
@@ -611,7 +643,7 @@ function render(now){const W=Number(canvas.dataset.cssWidth)||600,H=Number(canva
   for(const item of state.loot)drawLoot(item);
   for(const b of state.bullets){const x=b.x-state.camera.x,y=b.y-state.camera.y;ctx.save();ctx.translate(x,y);ctx.rotate(Math.atan2(b.vy,b.vx));ctx.shadowColor=b.color;ctx.shadowBlur=9;ctx.strokeStyle=b.color;ctx.lineWidth=b.acid?3:2;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(-15,0);ctx.lineTo(-3,0);ctx.stroke();ctx.fillStyle=b.acid?'#b5f28a':'#fff5d8';ctx.beginPath();ctx.ellipse(0,0,b.acid?3.3:3,b.acid?2.3:1.6,0,0,Math.PI*2);ctx.fill();ctx.restore();}
   for(const e of state.enemies)if(e.alive&&unitVisibleToTeam(e))drawEntity(e,e.type==='monster'?'#cf6350':e.team===state.player.team?COLORS.blue:'#bb7459',now,e.type==='guard'?(e.team===state.player.team?'ALLY GUARD':'GUARD'):e.variant?.toUpperCase()||'');for(const b of state.bots)if(b.alive&&unitVisibleToTeam(b))drawEntity(b,b.team==='blue'?COLORS.blue:COLORS.red,now,b.team===state.player.team?'ALLY':'HOSTILE');if(state.player?.alive)drawEntity(state.player,COLORS.lime,now,'YOU');for(const part of state.particles){const x=part.x-state.camera.x,y=part.y-state.camera.y;ctx.globalAlpha=clamp(part.life/part.max,0,1);ctx.fillStyle=part.color;if(part.grenade){ctx.beginPath();ctx.arc(x,y,part.r,0,Math.PI*2);ctx.fill();}else{ctx.beginPath();ctx.arc(x,y,part.r,0,Math.PI*2);ctx.fill();}}ctx.globalAlpha=1;
-  drawVisionFog(sx,sy,ex,ey);drawDoors();
+  drawRoomLighting();drawVisionFog(sx,sy,ex,ey);drawDoors();
   if(state.visibleMap)drawFullMap(W,H);}
 function drawHeldWeapon(id){const w=WEAPONS[id]||WEAPONS[0];ctx.save();ctx.lineCap='round';ctx.lineJoin='round';if(w.kind==='gun'){ctx.fillStyle='#131a16';ctx.strokeStyle='#c8d0c3';ctx.lineWidth=.8;ctx.beginPath();ctx.roundRect(2,-3.7,20,7.4,1);ctx.fill();ctx.stroke();ctx.fillStyle=w.color;if(w.family===0){ctx.fillRect(6,-4,12,2);ctx.fillRect(21,-1.7,7,3.4);ctx.fillStyle='#343c35';ctx.beginPath();ctx.moveTo(11,3);ctx.lineTo(17,3);ctx.lineTo(19,9);ctx.lineTo(14,9);ctx.closePath();ctx.fill();}
     else if(w.family===1){ctx.fillRect(3,-2,5,2);ctx.fillRect(6,-5,14,2);ctx.fillRect(21,-1.6,8,3.2);ctx.fillStyle='#343c35';ctx.fillRect(11,3,4,6);ctx.fillRect(1,1,4,4);if(id===12){ctx.fillStyle=w.color;ctx.beginPath();ctx.arc(15,6,5,0,Math.PI*2);ctx.fill();}}
@@ -619,7 +651,7 @@ function drawHeldWeapon(id){const w=WEAPONS[id]||WEAPONS[0];ctx.save();ctx.lineC
     else{ctx.fillRect(2,-5,6,3);ctx.fillRect(5,-6.5,9,1.5);ctx.fillRect(21,-1.5,11,3);ctx.fillStyle='#343c35';ctx.fillRect(12,3,4,7);ctx.fillRect(1,1,4,4);ctx.fillStyle=w.color;ctx.fillRect(15,-5,3,1.5);if(id===15)ctx.fillRect(31,-1.5,5,3);}}
   else{ctx.strokeStyle=w.color;ctx.fillStyle=w.color;ctx.lineWidth=2.4;ctx.beginPath();if(w.family===4){ctx.moveTo(3,5);ctx.lineTo(22,-5);ctx.stroke();ctx.fillStyle='#515a50';ctx.fillRect(1,4,7,3);}else if(w.family===5){ctx.moveTo(2,5);ctx.lineTo(25,-2);ctx.stroke();ctx.fillStyle=w.color;ctx.fillRect(24,-5,7,5);if(id===16){ctx.beginPath();ctx.moveTo(27,-4);ctx.lineTo(32,-9);ctx.lineTo(34,-7);ctx.stroke();}}else{ctx.moveTo(3,5);ctx.lineTo(22,-2);ctx.stroke();ctx.fillStyle='#d5d0bd';ctx.beginPath();ctx.moveTo(18,-2);ctx.lineTo(24,-11);ctx.lineTo(32,-9);ctx.lineTo(29,1);ctx.closePath();ctx.fill();}}
   ctx.restore();}
-function drawEntity(e,color,now,label){const x=e.x-state.camera.x,y=e.y-state.camera.y;ctx.save();if(e.invuln>0&&Math.floor(now/70)%2===0)ctx.globalAlpha=.38;ctx.fillStyle='#080b09aa';ctx.beginPath();ctx.ellipse(x,y+8,e.r*1.18,e.r*.67,0,0,Math.PI*2);ctx.fill();ctx.translate(x,y);ctx.rotate(e.angle||0);if(e.type==='monster'){
+function drawEntity(e,color,now,label){const x=(e.viewX??e.x)-state.camera.x,y=(e.viewY??e.y)-state.camera.y;ctx.save();if(e.invuln>0&&Math.floor(now/70)%2===0)ctx.globalAlpha=.38;ctx.fillStyle='#080b09aa';ctx.beginPath();ctx.ellipse(x,y+8,e.r*1.18,e.r*.67,0,0,Math.PI*2);ctx.fill();ctx.translate(x,y);ctx.rotate(e.angle||0);if(e.type==='monster'){
     const monsterColor=e.variant==='spitter'?'#719f59':e.variant==='brute'?'#924d43':'#bd6250';ctx.fillStyle=e.hitFlash>0?'#fff0d7':monsterColor;
     if(e.variant==='crawler'){ctx.beginPath();ctx.ellipse(-1,0,10,6,0,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#633d34';ctx.lineWidth=2;for(const side of [-1,1])for(let n=0;n<3;n++){const yy=(n-1)*3;ctx.beginPath();ctx.moveTo(-4+n*4,yy);ctx.lineTo(-8+n*3,yy+side*8);ctx.lineTo(-10+n*3,yy+side*9);ctx.stroke();}}
     else if(e.variant==='brute'){ctx.beginPath();ctx.ellipse(-1,0,15,13,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='#683c36';ctx.beginPath();ctx.moveTo(-9,-7);ctx.lineTo(-15,-15);ctx.lineTo(-3,-10);ctx.fill();ctx.beginPath();ctx.moveTo(7,-7);ctx.lineTo(14,-14);ctx.lineTo(11,-4);ctx.fill();ctx.fillStyle='#ecb489';ctx.fillRect(7,-4,4,3);ctx.fillRect(7,2,4,3);}

@@ -10,6 +10,8 @@ A browser-based, top-down shooter with two operations: escape a hostile research
 
 **PvP Arena** is team deathmatch in a fresh randomized facility each match, using the same map generator as Lab Escape. Your view extends along every clear sight line, and room doors open and close with **E**. The Armory holds four randomly selected firearms for either team to find. Choose 5v5 or 10v10, a side, and a score target of 50, 100, or 250 eliminations. Players start with a varied weapon roll; AI bots start mostly with a pistol and sometimes a basic melee weapon or SMG. Both reroll on respawn. Bots weigh ground weapons by the ranges and roles missing from their loadout, and sometimes pass on a situational pickup. Bots keep a better variant instead of taking an inferior gun from the same family. Each team has a melee pickup near its starting area. Bots search unvisited rooms for loot, favoring the Supply Hub and Armory, until an opponent enters their shorter line of sight; when attacked, they reassess visible opponents and can switch to the attacker. They cannot track hidden allies through walls. Found gear drops when a player or bot is eliminated, while world pickups refill after 6 seconds with new locations and items. Additional random pickups appear every 7 seconds, up to a density cap. Your map reveals terrain and units through your squad's shared vision and marks the opposing spawn with a large red box; unseen enemies are fully hidden. When a public room server is configured, GitHub Pages players can create or join a room by code; otherwise the hosted game offers bot matches.
 
+In either operation, highlighted computers can be used with **E**. The Control Room terminal opens or closes the Armory, Medical, and Quarantine doors; the Power Station terminal cuts or restores lights in nearby technical rooms. In online matches, the room server controls these changes for everyone.
+
 ## Controls
 
 | Input | Action |
@@ -17,7 +19,7 @@ A browser-based, top-down shooter with two operations: escape a hostile research
 | W A S D / arrow keys | Move |
 | Mouse | Aim |
 | Hold left mouse button or Space | Fire / swing |
-| E | Open / close a nearby door, collect supplies, or extract |
+| E | Use a computer, open / close a nearby door, collect supplies, or extract |
 | 1–4 | Select an inventory slot (or swap a weapon pickup) |
 | R | Reload the selected firearm |
 | G | Throw a grenade from any inventory slot |

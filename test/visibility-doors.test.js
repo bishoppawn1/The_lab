@@ -120,6 +120,21 @@ test('door interactions ignore keyboard repeats and paused or finished runs', ()
   assert.equal(door.open, false);
 });
 
+test('a nearby computer offers an action and toggles its room lights locally', () => {
+  const {state,nearbyInteraction,interact,updateHUD,element}=fixture();
+  const room={name:'POWER STATION',lightsOn:true};
+  const terminal={x:state.player.x+30,y:state.player.y,halfW:14,halfH:11,terminal:{action:'lights',targets:['POWER STATION'],active:false}};
+  state.world.rooms=[room];state.world.terminals=[terminal];
+  assert.equal(nearbyInteraction().type,'terminal');
+  updateHUD();
+  assert.match(element('#context-prompt').textContent,/SHUT OFF LIGHTS/);
+  interact();
+  assert.equal(room.lightsOn,false);
+  assert.equal(terminal.terminal.active,true);
+  updateHUD();
+  assert.match(element('#context-prompt').textContent,/RESTORE LIGHTS/);
+});
+
 test('supplies by an open door remain collectible and the HUD describes the selected action', () => {
   const { state, setDoorOpen, interact, updateVision, updateHUD, element } = fixture();
   const door = addDoor(state);

@@ -112,13 +112,44 @@ export function moveActor(world,actor,dx,dy){
   if(!isBlocked(world,actor.x,ny,radius))actor.y=ny;
 }
 
+function doorwayOccupied(world,door,units){
+  const tile=world.tile||32;
+  return units.some(unit=>unit?.alive&&unit.x+(unit.r||10)>door.x*tile&&unit.x-(unit.r||10)<(door.x+2)*tile&&unit.y+(unit.r||10)>door.y*tile&&unit.y-(unit.r||10)<(door.y+1)*tile);
+}
+
 export function changeDoorState(world,door,open,units){
   if(!door||door.open===open)return false;
-  const tile=world.tile||32;
-  if(!open&&units.some(unit=>unit?.alive&&unit.x+(unit.r||10)>door.x*tile&&unit.x-(unit.r||10)<(door.x+2)*tile&&unit.y+(unit.r||10)>door.y*tile&&unit.y-(unit.r||10)<(door.y+1)*tile))return false;
+  if(!open&&doorwayOccupied(world,door,units))return false;
   door.open=open;
   world.visionAt=-Infinity;
   return true;
+}
+
+export function nearbyTerminal(world,actor,radius=58){
+  return (world.terminals||[]).filter(terminal=>{
+    if(Math.hypot(actor.x-terminal.x,actor.y-terminal.y)>=radius)return false;
+    const edge={x:Math.max(terminal.x-terminal.halfW,Math.min(actor.x,terminal.x+terminal.halfW)),y:Math.max(terminal.y-terminal.halfH,Math.min(actor.y,terminal.y+terminal.halfH))};
+    return hasLineOfSight(world,actor,edge,0);
+  }).sort((a,b)=>Math.hypot(actor.x-a.x,actor.y-a.y)-Math.hypot(actor.x-b.x,actor.y-b.y))[0]||null;
+}
+
+export function operateTerminal(world,terminal,units=[]){
+  if(!terminal?.terminal)return false;
+  const {action,targets}=terminal.terminal,next=!terminal.terminal.active;
+  if(action==='lights'){
+    for(const room of world.rooms)if(targets.includes(room.name))room.lightsOn=!next;
+    terminal.terminal.active=next;
+    return true;
+  }
+  if(action==='doors'){
+    const doors=world.doors.filter(door=>targets.includes(door.room.name));
+    if(!next&&doors.some(door=>door.open&&doorwayOccupied(world,door,units)))return false;
+    let changed=false;
+    for(const door of doors)changed=changeDoorState(world,door,next,units)||changed;
+    if(changed)terminal.terminal.active=next;
+    return changed;
+  }
+  return false;
 }
 
 export function canSeeOpponent(world,observer,target,range){

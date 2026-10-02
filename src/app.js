@@ -34,6 +34,7 @@ function usesLocalRooms(){
 }
 function roomServiceBase(){
   if(typeof window==='undefined')return null;
+  if(usesLocalRooms())return window.location.origin;
   const configured=window.THE_LAB_ROOM_SERVER_URL?.trim();
   if(configured){
     try{
@@ -41,7 +42,7 @@ function roomServiceBase(){
       if(url.protocol==='https:')return url.origin;
     }catch{}
   }
-  return usesLocalRooms()?window.location.origin:null;
+  return null;
 }
 function showMenu(){closeRemoteMatch();state.running=false;state.paused=false;state.runId++;clearOperationUi();menu.classList.remove('hidden');setup.classList.add('hidden');game.classList.add('hidden');}
 function openSetup(mode){

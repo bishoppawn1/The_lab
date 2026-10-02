@@ -44,7 +44,7 @@ The build writes a static copy to `dist/` and adds cache-busting versions to loc
 
 ## Put multiplayer online
 
-The repo contains [render.yaml](render.yaml), a free Render web-service blueprint for the Node room server. The deployed room server is at [bishoppawn1-the-lab-rooms.onrender.com](https://bishoppawn1-the-lab-rooms.onrender.com/health). The GitHub Pages workflow embeds this URL in `room-config.js`, so players opening the [GitHub Pages game](https://bishoppawn1.github.io/The_lab/) see **Create room** and **Join with code**. The browser uses HTTPS for room requests and WSS for live matches. If the room server moves, update `PUBLIC_ROOM_SERVER_URL` in `.github/workflows/pages.yml` and push a commit.
+The repo contains [render.yaml](render.yaml), a free Render web-service blueprint for the Node room server. The deployed room server is at [bishoppawn1-the-lab-rooms.onrender.com](https://bishoppawn1-the-lab-rooms.onrender.com/health). The checked-in `room-config.js` points the published game at this server, and the GitHub Pages workflow embeds the same URL in its built artifact. Players opening the [GitHub Pages game](https://bishoppawn1.github.io/The_lab/) see **Create room** and **Join with code**. The browser uses HTTPS for room requests and WSS for live matches. If the room server moves, update both `room-config.js` and `PUBLIC_ROOM_SERVER_URL` in `.github/workflows/pages.yml` and push a commit.
 
 The public server responds to `GET /health`; check that endpoint before sharing room codes. Render's free instance can sleep after 15 minutes of inactivity and takes time to wake. Rooms are held in memory, so a restart ends active rooms. The room server has a 16-room limit; a larger audience will need more capacity and persistent match coordination.
 
@@ -76,7 +76,7 @@ Movement axes are clamped to −1 through 1; `aim` is in radians; `slot` is 0–
 - `src/app.js` — local and server-driven match orchestration, browser input, sound, UI, and rendering; it uses the shared modules above
 - `scripts/server.js` — local preview that serves the game and room API on one port
 - `scripts/room-server.js` — coded rooms, lobby state, and isolated authoritative matches over HTTP and WebSocket
-- `room-config.js` — local default for the browser's room-service URL; the Pages build replaces it from `PUBLIC_ROOM_SERVER_URL`
+- `room-config.js` — public room-service URL for branch-served Pages; the Pages build replaces it from `PUBLIC_ROOM_SERVER_URL`, while local previews use their own room server
 - `render.yaml` — deployment blueprint for the public room service
 - `scripts/match-server.js` — original single-match WebSocket protocol test server
 - `test/arena-core.test.js` — runs shared map and arena rules directly in Node, without a browser

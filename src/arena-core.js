@@ -247,17 +247,14 @@ export function steerActor(world,actor,target,pathPoint,speed,dt,requireLane=fal
   }else actor.stuckTime=0;
 }
 
-function visionRayClear(world,actor,x,y){
+function visionRayClear(world,actor,x,y,opaque){
   const tile=world.tile||32,targetX=(x+.5)*tile,targetY=(y+.5)*tile;
   let cx=Math.floor(actor.x/tile),cy=Math.floor(actor.y/tile);
   const dx=targetX-actor.x,dy=targetY-actor.y,sx=Math.sign(dx),sy=Math.sign(dy);
   let nextX=sx?((cx+(sx>0?1:0))*tile-actor.x)/dx:Infinity;
   let nextY=sy?((cy+(sy>0?1:0))*tile-actor.y)/dy:Infinity;
   const deltaX=sx?tile/Math.abs(dx):Infinity,deltaY=sy?tile/Math.abs(dy):Infinity;
-  const blocked=(tx,ty)=>{
-    const key=`${tx},${ty}`;
-    return world.map[ty]?.[tx]!==0||world.doorTiles?.get(key)?.open===false||world.coverGrid?.has(key);
-  };
+  const blocked=(tx,ty)=>opaque[ty*world.w+tx]!==0;
   while(cx!==x||cy!==y){
     if(nextX<nextY){cx+=sx;nextX+=deltaX;}
     else if(nextY<nextX){cy+=sy;nextY+=deltaY;}
@@ -273,12 +270,25 @@ function visionRayClear(world,actor,x,y){
 
 export function revealTiles(world,observers){
   const visible=new Set(),tile=world.tile||32;
+  if(!observers.length)return visible;
+  // Rays traverse the same wall, door, and cover tiles; build their numeric
+  // occupancy once instead of creating map keys at every step of every ray.
+  const opaque=new Uint8Array(world.w*world.h);
+  for(let y=0;y<world.h;y++)opaque.set(world.map[y],y*world.w);
+  for(const [key,door] of world.doorTiles||[])if(!door.open){
+    const comma=key.indexOf(','),x=Number(key.slice(0,comma)),y=Number(key.slice(comma+1));
+    opaque[y*world.w+x]=1;
+  }
+  for(const key of world.coverGrid?.keys()||[]){
+    const comma=key.indexOf(','),x=Number(key.slice(0,comma)),y=Number(key.slice(comma+1));
+    opaque[y*world.w+x]=1;
+  }
   for(const {actor,radius} of observers){
     const tx=Math.floor(actor.x/tile),ty=Math.floor(actor.y/tile);
     const limit=Number.isFinite(radius)?radius:Infinity;
     for(let y=Math.max(1,ty-limit);y<=Math.min(world.h-2,ty+limit);y++)for(let x=Math.max(1,tx-limit);x<=Math.min(world.w-2,tx+limit);x++){
       if(limit!==Infinity&&Math.hypot(x-tx,y-ty)>limit||world.map[y]?.[x]!==0)continue;
-      if(visionRayClear(world,actor,x,y))visible.add(`${x},${y}`);
+      if(visionRayClear(world,actor,x,y,opaque))visible.add(`${x},${y}`);
     }
   }
   return visible;

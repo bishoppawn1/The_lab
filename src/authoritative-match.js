@@ -108,6 +108,12 @@ export class AuthoritativeMatch {
     this.visionCache.clear();
     return true;
   }
+  suspendPlayer(id){
+    const player=this.players.get(id);
+    if(!player)return false;
+    player.input=EMPTY_INPUT();
+    return true;
+  }
   submitInput(id,input){
     const player=this.players.get(id);
     if(!player||!input||typeof input!=='object'||Array.isArray(input))return false;

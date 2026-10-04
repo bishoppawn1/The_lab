@@ -1,4 +1,4 @@
-import { randomInt } from 'node:crypto';
+import { randomBytes, randomInt } from 'node:crypto';
 import { createServer } from 'node:http';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +9,7 @@ const TICK_MS=1000/30;
 const SNAPSHOT_MS=100;
 const CODE_ALPHABET='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const MAX_ROOMS=16;
+const RECONNECT_GRACE_MS=30_000;
 const PAGE_ORIGIN='https://bishoppawn1.github.io';
 const localOrigin=origin=>/^http:\/\/(?:localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|[a-z0-9-]+\.local)(?::\d+)?$/.test(origin);
 const allowedOrigin=origin=>!origin||origin===PAGE_ORIGIN||localOrigin(origin)||process.env.ROOM_ALLOWED_ORIGINS?.split(',').map(value=>value.trim()).includes(origin);
@@ -19,6 +20,7 @@ const json=(response,status,value)=>{
 
 export function createRoomHub(server){
   const rooms=new Map();
+  const startedAt=new Date().toISOString();
   const wss=new WebSocketServer({noServer:true,maxPayload:1024,perMessageDeflate:false});
   const roomCode=()=>{
     let code;
@@ -35,22 +37,34 @@ export function createRoomHub(server){
 
   server.on('upgrade',(request,socket,head)=>{
     if(!allowedOrigin(request.headers.origin)){socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');socket.destroy();return;}
-    const path=new URL(request.url,'http://localhost').pathname;
+    const url=new URL(request.url,'http://localhost');
+    const path=url.pathname;
     const code=/^\/rooms\/([A-Z2-9]{6})$/.exec(path)?.[1];
     const room=rooms.get(code);
-    if(!room||room.started){socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');socket.destroy();return;}
+    const resume=url.searchParams.get('resume');
+    if(!room||(room.started&&(!resume||!room.sessions.has(resume)))){
+      socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');socket.destroy();return;
+    }
     wss.handleUpgrade(request,socket,head,ws=>wss.emit('connection',ws,request,room));
   });
   wss.on('connection',(socket,request,room)=>{
-    const selected=new URL(request.url,'http://localhost').searchParams.get('team');
-    const player=room.match.addPlayer(selected==='blue'||selected==='red'?selected:null);
+    const params=new URL(request.url,'http://localhost').searchParams;
+    const selected=params.get('team'),resume=params.get('resume');
+    const resumedId=resume&&room.sessions.get(resume);
+    const player=resumedId?room.match.players.get(resumedId):room.match.addPlayer(selected==='blue'||selected==='red'?selected:null);
     if(!player){socket.close(1013,'Selected team is full');return;}
+    const token=resumedId?resume:randomBytes(24).toString('base64url');
+    if(!resumedId)room.sessions.set(token,player.id);
+    for(const [oldSocket,id] of room.clients)if(id===player.id){room.clients.delete(oldSocket);oldSocket.close(1000,'Reconnected elsewhere');}
+    room.disconnected.delete(player.id);
     room.hadPlayers=true;
     room.clients.set(socket,player.id);
     room.hostId??=player.id;
-    socket.send(JSON.stringify({type:'welcome',id:player.id,team:player.team,code:room.code,seed:room.match.seed,teamSize:room.match.teamSize,target:room.match.target,tickRate:30}));
-    publishLobby(room);
+    socket.send(JSON.stringify({type:'welcome',id:player.id,team:player.team,code:room.code,seed:room.match.seed,teamSize:room.match.teamSize,target:room.match.target,tickRate:30,resumeToken:token,resumed:Boolean(resumedId)}));
+    if(room.started)socket.send(JSON.stringify(room.match.snapshot(player.id)));
+    else publishLobby(room);
     socket.on('message',data=>{
+      if(room.clients.get(socket)!==player.id)return;
       let message;
       try{message=JSON.parse(data.toString());}catch{return;}
       if(message?.type==='input'){
@@ -71,7 +85,15 @@ export function createRoomHub(server){
       }
     });
     socket.on('close',()=>{
-      room.clients.delete(socket);room.ready.delete(player.id);room.match.removePlayer(player.id);
+      if(room.clients.get(socket)!==player.id)return;
+      room.clients.delete(socket);
+      if(room.started){
+        room.match.suspendPlayer(player.id);
+        room.disconnected.set(player.id,Date.now()+RECONNECT_GRACE_MS);
+        return;
+      }
+      room.ready.delete(player.id);room.match.removePlayer(player.id);
+      room.sessions.delete(token);
       if(room.hostId===player.id)room.hostId=room.match.players.keys().next().value??null;
       if(room.match.players.size){if(!room.started)publishLobby(room);}
       else rooms.delete(room.code);
@@ -80,7 +102,7 @@ export function createRoomHub(server){
   });
 
   const tick=setInterval(()=>{
-    for(const room of rooms.values())if(room.started&&room.match.players.size)room.match.step(TICK_MS/1000);
+    for(const room of rooms.values())if(room.started&&room.clients.size)room.match.step(TICK_MS/1000);
   },TICK_MS);
   const snapshots=setInterval(()=>{
     for(const room of rooms.values())if(room.started)for(const [socket,id] of room.clients){
@@ -91,15 +113,22 @@ export function createRoomHub(server){
   },SNAPSHOT_MS);
   const cleanup=setInterval(()=>{
     const now=Date.now();
-    for(const room of rooms.values())if(!room.hadPlayers&&now-room.createdAt>10*60_000)rooms.delete(room.code);
-  },60_000);
+    for(const room of rooms.values()){
+      for(const [id,deadline] of room.disconnected)if(now>=deadline){
+        room.disconnected.delete(id);
+        room.match.removePlayer(id);
+        for(const [token,owner] of room.sessions)if(owner===id)room.sessions.delete(token);
+      }
+      if(!room.match.players.size&&(room.hadPlayers||now-room.createdAt>10*60_000))rooms.delete(room.code);
+    }
+  },1_000);
 
   return{
     rooms,
     async handleRequest(request,response){
       const path=new URL(request.url,'http://localhost').pathname;
       if(path==='/health'&&request.method==='GET'){
-        json(response,200,{status:'ok',rooms:rooms.size,players:[...rooms.values()].reduce((count,room)=>count+room.match.players.size,0)});
+        json(response,200,{status:'ok',startedAt,rooms:rooms.size,players:[...rooms.values()].reduce((count,room)=>count+room.match.players.size,0)});
         return true;
       }
       if(path==='/rooms'||path.startsWith('/rooms/')){
@@ -121,7 +150,7 @@ export function createRoomHub(server){
           const {teamSize,target}=JSON.parse(body);
           if(![5,10].includes(teamSize)||![50,100,250].includes(target))throw new Error('Invalid match settings');
           const code=roomCode(),match=new AuthoritativeMatch({teamSize,target});
-          rooms.set(code,{code,match,clients:new Map(),ready:new Set(),hostId:null,started:false,hadPlayers:false,createdAt:Date.now()});
+          rooms.set(code,{code,match,clients:new Map(),ready:new Set(),sessions:new Map(),disconnected:new Map(),hostId:null,started:false,hadPlayers:false,createdAt:Date.now()});
           json(response,201,{code,teamSize,target});
         }catch(error){json(response,400,{error:error.message});}
         return true;

@@ -7,3 +7,11 @@ services:
     buildCommand: npm ci
     startCommand: npm run room-server
     healthCheckPath: /health
+    buildFilter:
+      paths:
+        - scripts/room-server.js
+        - src/authoritative-match.js
+        - src/facility.js
+        - src/arena-core.js
+        - package.json
+        - package-lock.json

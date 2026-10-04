@@ -25,10 +25,11 @@ const rand=(a,b)=>a+Math.random()*(b-a), clamp=(n,a,b)=>Math.max(a,Math.min(b,n)
 
 function clearOperationUi(){for(const id of ['pause-overlay','end-overlay','round-banner','notice','inventory-prompt'])$(`#${id}`).classList.add('hidden');game.classList.remove('paused');state.keys.clear();state.mouse.down=false;state.touchFire=false;state.pendingLoot=null;}
 function closeRemoteMatch(){
-  state.lobby?.socket.close();
-  state.remote?.socket.close();
+  const lobby=state.lobby,remote=state.remote;
   state.lobby=null;
   state.remote=null;
+  lobby?.socket.close();
+  remote?.socket.close();
 }
 function usesLocalRooms(){
   if(typeof window==='undefined')return false;
@@ -216,7 +217,7 @@ function startLocalGame(seed){clearOperationUi();state.runId++;setup.classList.a
 function connectRoom(url){return new Promise((resolve,reject)=>{
   const socket=new WebSocket(url);
   const timeout=setTimeout(()=>{socket.close();fail('Room connection timed out');},5000);
-  let welcome=null,lobby=null,settled=false;
+  let welcome=null,lobby=null,snapshot=null,settled=false;
   const fail=message=>{if(settled)return;settled=true;clearTimeout(timeout);reject(new Error(message));};
   socket.onerror=()=>fail('Room connection failed');
   socket.onclose=event=>fail(event.reason||'Room connection closed');
@@ -224,9 +225,66 @@ function connectRoom(url){return new Promise((resolve,reject)=>{
     let message;try{message=JSON.parse(event.data);}catch{return;}
     if(message.type==='welcome')welcome=message;
     if(message.type==='lobby')lobby=message;
-    if(welcome&&lobby&&!settled){settled=true;clearTimeout(timeout);resolve({socket,welcome,lobby});}
+    if(message.type==='snapshot')snapshot=message;
+    if(welcome&&(lobby||snapshot)&&!settled){settled=true;clearTimeout(timeout);resolve({socket,welcome,lobby,snapshot});}
   };
 });}
+function handleRoomSocketMessage(socket,event){
+  let message;try{message=JSON.parse(event.data);}catch{return;}
+  if(message.type==='lobby'){
+    if(state.lobby?.socket===socket){state.lobby.state=message;renderRoomLobby();}
+  }else if(message.type==='lobby-error'){
+    if(state.lobby?.socket===socket)$('#room-lobby-message').textContent=message.message;
+  }else if(message.type==='snapshot'){
+    if(state.lobby?.socket===socket)startRoomMatch(message);
+    else if(state.remote?.socket===socket)applyRemoteSnapshot(message);
+  }
+}
+function handleRoomSocketClose(socket){
+  if(state.lobby?.socket===socket){openSetup('pvp');$('#setup-subtitle').textContent='Room connection lost. Create or join a room again.';}
+  else if(state.remote?.socket===socket&&state.running)reconnectRoomMatch(state.remote);
+}
+function bindRoomSocket(socket){
+  socket.onmessage=event=>handleRoomSocketMessage(socket,event);
+  socket.onclose=()=>handleRoomSocketClose(socket);
+  socket.onerror=()=>{};
+}
+async function reconnectRoomMatch(remote){
+  if(remote.reconnecting)return;
+  remote.reconnecting=true;
+  remote.actions={};
+  const startedAt=Date.now();
+  let attempts=0;
+  while(state.remote===remote&&state.running&&Date.now()-startedAt<30_000){
+    const base=roomServiceBase();
+    if(!base)break;
+    const url=new URL(base);
+    url.protocol=url.protocol==='https:'?'wss:':'ws:';
+    url.pathname=`/rooms/${remote.code}`;
+    url.searchParams.set('resume',remote.resumeToken);
+    try{
+      const connection=await connectRoom(url.toString());
+      if(state.remote!==remote||!state.running){connection.socket.close();return;}
+      if(connection.welcome.id!==remote.id||!connection.snapshot){connection.socket.close();throw new Error('Could not resume player');}
+      remote.socket=connection.socket;
+      remote.resumeToken=connection.welcome.resumeToken;
+      remote.nextInputAt=0;
+      remote.reconnecting=false;
+      bindRoomSocket(connection.socket);
+      applyRemoteSnapshot(connection.snapshot);
+      $('#round-banner').classList.add('hidden');
+      announce('MATCH RECONNECTED');
+      return;
+    }catch{}
+    const wait=Math.min(500*2**attempts++,4000);
+    await new Promise(done=>setTimeout(done,wait));
+  }
+  if(state.remote===remote&&state.running){
+    remote.reconnecting=false;
+    $('#round-banner').classList.add('hidden');
+    finish(false,'ROOM LOST','Could not reconnect. The room may have expired or the server restarted.');
+  }
+}
 function renderRoomLobby(){
   const room=state.lobby;if(!room)return;
   const data=room.state,self=data.players.find(player=>player.id===room.welcome.id),isHost=data.hostId===room.welcome.id;
@@ -249,7 +307,7 @@ function startRoomMatch(snapshot){
   state.teamSize=welcome.teamSize;
   state.settings.target=welcome.target;
   startLocalGame(welcome.seed);
-  state.remote={socket,id:welcome.id,nextInputAt:0,actions:{}};
+  state.remote={socket,id:welcome.id,code:welcome.code,resumeToken:welcome.resumeToken,nextInputAt:0,actions:{},reconnecting:false};
   applyRemoteSnapshot(snapshot);
   $('#mode-label').textContent=`${usesLocalRooms()?'DEV':'ONLINE'} MATCH · ${state.teamSize}V${state.teamSize}`;
   $('#teams-line').textContent=`ROOM ${welcome.code} · SERVER MATCH`;
@@ -280,19 +338,7 @@ async function startGame(){
     const connection=await connectRoom(`${roomUrl.origin}/rooms/${code}?team=${state.settings.team}`);
     if(runId!==state.runId){connection.socket.close();return;}
     state.lobby={...connection,state:connection.lobby};
-    connection.socket.onmessage=event=>{
-      let message;try{message=JSON.parse(event.data);}catch{return;}
-      if(message.type==='lobby'){if(state.lobby?.socket===connection.socket){state.lobby.state=message;renderRoomLobby();}}
-      else if(message.type==='lobby-error')$('#room-lobby-message').textContent=message.message;
-      else if(message.type==='snapshot'){
-        if(state.lobby?.socket===connection.socket)startRoomMatch(message);
-        else if(state.remote?.socket===connection.socket)applyRemoteSnapshot(message);
-      }
-    };
-    connection.socket.onclose=()=>{
-      if(state.lobby?.socket===connection.socket){openSetup('pvp');$('#setup-subtitle').textContent='Room connection lost. Create or join a room again.';}
-      else if(state.remote?.socket===connection.socket&&state.running)finish(false,'CONNECTION LOST','The room server disconnected.');
-    };
+    bindRoomSocket(connection.socket);
     renderRoomLobby();
   }catch(error){
     if(runId===state.runId)$('#setup-subtitle').textContent=error.message;
@@ -339,6 +385,10 @@ function applyRemoteSnapshot(snapshot){
 function queueRemoteAction(name,value=true){if(state.remote)state.remote.actions[name]=value;}
 function updateRemote(now,dt=0){
   const p=state.player;if(!p)return;
+  if(state.remote&&!state.remote.reconnecting&&state.remote.snapshotAt&&now-state.remote.snapshotAt>8_000){
+    reconnectRoomMatch(state.remote);
+    state.remote.socket.close();
+  }
   const follow=1-Math.exp(-dt*18);
   p.viewX+=(p.x-p.viewX)*follow;
   p.viewY+=(p.y-p.viewY)*follow;
@@ -354,7 +404,7 @@ function updateRemote(now,dt=0){
   const pointer=state.mouse;
   if(state.touchFire){const target=state.bots.filter(unit=>unit.alive&&unit.team!==p.team).sort((a,b)=>dist(p,a)-dist(p,b))[0];if(target)p.angle=Math.atan2(target.y-p.y,target.x-p.x);}
   else p.angle=Math.atan2(pointer.y+state.camera.y-p.y,pointer.x+state.camera.x-p.x);
-  const remote=state.remote;if(!remote||remote.socket.readyState!==WebSocket.OPEN||now<remote.nextInputAt)return;
+  const remote=state.remote;if(!remote||remote.reconnecting||remote.socket.readyState!==WebSocket.OPEN||now<remote.nextInputAt)return;
   const moveX=Number(state.keys.has('d')||state.keys.has('arrowright'))-Number(state.keys.has('a')||state.keys.has('arrowleft'));
   const moveY=Number(state.keys.has('s')||state.keys.has('arrowdown'))-Number(state.keys.has('w')||state.keys.has('arrowup'));
   remote.socket.send(JSON.stringify({type:'input',moveX,moveY,aim:p.angle,fire:pointer.down||state.keys.has(' '),...remote.actions}));
@@ -389,7 +439,7 @@ function setBanner(text){const el=$('#round-banner'),runId=state.runId;el.textCo
 function sound(freq=180,type='square',duration=.045,volume=.025){try{audioContext??=new(window.AudioContext||window.webkitAudioContext)();const osc=audioContext.createOscillator(),gain=audioContext.createGain();osc.type=type;osc.frequency.value=freq;gain.gain.setValueAtTime(volume,audioContext.currentTime);gain.gain.exponentialRampToValueAtTime(.001,audioContext.currentTime+duration);osc.connect(gain);gain.connect(audioContext.destination);osc.start();osc.stop(audioContext.currentTime+duration);}catch{}}
 
 function resizeCanvas(){const rect=canvas.getBoundingClientRect();if(!rect.width||!rect.height)return;const dpr=Math.min(window.devicePixelRatio||1,2);canvas.width=Math.round(rect.width*dpr);canvas.height=Math.round(rect.height*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);canvas.dataset.cssWidth=rect.width;canvas.dataset.cssHeight=rect.height;}
-function frame(now,runId){if(!state.running||runId!==state.runId)return;requestAnimationFrame(next=>frame(next,runId));if(state.paused)return;const dt=Math.min((now-state.lastTime)/1000,.045);state.lastTime=now;if(state.remote)updateRemote(now,dt);else{state.elapsed+=dt;update(dt,now);}render(now);if(now>=state.nextHudAt){updateHUD();state.nextHudAt=now+HUD_INTERVAL_MS;}if(now>=state.nextMinimapAt){drawMinimapTerrain();state.nextMinimapAt=now+MINIMAP_INTERVAL_MS;}drawMinimap();if(!$('#notice').classList.contains('hidden')&&now-lastNotice>1600)$('#notice').classList.add('hidden');}
+function frame(now,runId){if(!state.running||runId!==state.runId)return;requestAnimationFrame(next=>frame(next,runId));if(state.paused)return;const dt=Math.min((now-state.lastTime)/1000,.045);state.lastTime=now;if(state.remote)updateRemote(now,dt);else{state.elapsed+=dt;update(dt,now);}render(now);if(state.remote?.reconnecting){const banner=$('#round-banner');banner.textContent='RECONNECTING TO ROOM…';banner.classList.remove('hidden');}if(now>=state.nextHudAt){updateHUD();state.nextHudAt=now+HUD_INTERVAL_MS;}if(now>=state.nextMinimapAt){drawMinimapTerrain();state.nextMinimapAt=now+MINIMAP_INTERVAL_MS;}drawMinimap();if(!$('#notice').classList.contains('hidden')&&now-lastNotice>1600)$('#notice').classList.add('hidden');}
 function update(dt,now){const p=state.player;if(!p)return;const cx=Number(canvas.dataset.cssWidth)||600,cy=Number(canvas.dataset.cssHeight)||400;state.camera.x=clamp(p.x-cx/2,0,state.world.w*32-cx);state.camera.y=clamp(p.y-cy/2,0,state.world.h*32-cy);updateVision(now);const pointer=state.mouse;const sx=pointer.x+state.camera.x,sy=pointer.y+state.camera.y;if(state.touchFire){const targets=state.mode==='pvp'?state.bots.filter(b=>b.alive&&b.team!==p.team):state.enemies.filter(e=>e.alive);const target=targets.sort((a,b)=>dist(p,a)-dist(p,b))[0];if(target)p.angle=Math.atan2(target.y-p.y,target.x-p.x);}else p.angle=Math.atan2(sy-p.y,sx-p.x);if(p.invuln>0)p.invuln=Math.max(0,p.invuln-dt);if(p.hitFlash>0)p.hitFlash=Math.max(0,p.hitFlash-dt);if(p.reloadUntil>0&&now>=p.reloadUntil){const id=p.reloadingWeapon,w=WEAPONS[id];if(w?.kind==='gun')p.ammo[id]=w.magazine;p.reloadUntil=0;p.reloadingWeapon=null;log(`${w?.name||'Weapon'} reloaded.`,'good');renderWeapons();}if(p.stun>0)p.stun-=dt;
   let mx=(state.keys.has('d')||state.keys.has('arrowright')?1:0)-(state.keys.has('a')||state.keys.has('arrowleft')?1:0);let my=(state.keys.has('s')||state.keys.has('arrowdown')?1:0)-(state.keys.has('w')||state.keys.has('arrowup')?1:0);const mag=Math.hypot(mx,my);if(p.alive&&mag){mx/=mag;my/=mag;move(p,mx*p.speed*dt,my*p.speed*dt);}
   if(p.alive&&(pointer.down||state.keys.has(' '))&&now>state.fireAt)shoot(p,p.angle,now);for(const bot of state.bots)if(bot.alive)updateBot(bot,dt,now);else{bot.respawn-=dt;if(bot.respawn<=0)respawnBot(bot);}
